@@ -34,7 +34,12 @@
 })();
 
 function injectScript() {
+    // 实际注入前再检查一遍图标，避免异步注入导致出现两个图标
     waitUtil('div.ol-cm-toolbar-button-group.ol-cm-toolbar-end', el => {
+        if (document.getElementById('toggleIcon')) {
+            return;
+        }
+
         let iconBox = createToggleIcon();
         el.appendChild(iconBox);
 
@@ -215,7 +220,8 @@ function createToggleIcon() {
     iconBox.style.justifyContent = 'center';
     iconBox.style.alignItems = 'center';
     iconBox.id = "toggleIcon";
-    iconBox.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>';
+    iconBox.title = "Overleaf Bib Helper (点击打开/关闭搜索)";
+    iconBox.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" style="fill: currentColor;"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>';
     return iconBox;
 }
 
@@ -225,6 +231,13 @@ function createBox() {
     box.style = 'width:300px;background:#eef;padding:10px;border:1px solid #ccc;border-radius:5px;position:absolute;display:none;top:0px;left:0px';
     box.innerHTML = `
     <style>
+        .popup-footer-hint {
+            margin-top: 10px;
+            font-size: 10px;
+            color: var(--ol-foreground-secondary, #888);
+            text-align: center;
+            width: 100%;
+        }
         .popup-form {
             display: flex;
             flex-direction: column;
@@ -333,6 +346,7 @@ function createBox() {
             </div>
         </div>
         <div id="search-content"></div>
+        <div class="popup-footer-hint">提示：按 ESC 键或点击图标可快速关闭</div>
     </div>
 `;
 
