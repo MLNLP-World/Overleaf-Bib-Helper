@@ -1,17 +1,8 @@
-<<<<<<< HEAD
-# 仓库迁移通知
-=======
 <div align="center">
   <img src="figure/logo-v2.svg" width="50" />
   <h1>Overleaf-Bib-Helper</h1>
 </div>
->>>>>>> adfe436 (Release v1.8: cleanup + new assets)
 
-此仓库已迁移至 MLNLP 社区，新的仓库地址为：[https://github.com/MLNLP-World/Overleaf-Bib-Helper](https://github.com/MLNLP-World/Overleaf-Bib-Helper)。
-
-<<<<<<< HEAD
-请大家前往新仓库获取最新的代码更新、提交问题和贡献代码。感谢大家的支持与理解！
-=======
 <p align="center">
   <a href="https://greasyfork.org/zh-CN/scripts/532304-overleaf-bib-helper">
     <img alt="从Greasy Fork安装" src="https://img.shields.io/badge/Install-Greasy_Fork-blue" />
@@ -19,7 +10,7 @@
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/releases">
     <img alt="版本" src="https://img.shields.io/badge/Version-1.8-blue" />
   </a>
-  <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/blob/main/LICENSE.md">
+  <a href="LICENSE">
     <img alt="许可证" src="https://img.shields.io/badge/License-MIT-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/stargazers">
@@ -161,7 +152,7 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 - **2025-04-09**：初始版本，支持DBLP和Google Scholar的基本功能（v1.1）。
 
 ## 许可证
-此项目采用MIT许可证 - 详情见[LICENSE.md](https://github.com/MLNLP-World/Overleaf-Bib-Helper/blob/main/LICENSE.md)。
+此项目采用MIT许可证 - 详情见[LICENSE](LICENSE)。
 
 ## 贡献
 欢迎分叉[GitHub仓库](https://github.com/MLNLP-World/Overleaf-Bib-Helper)，提交问题或创建改进的拉取请求！
@@ -177,4 +168,3 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 
 ## 致谢
 灵感来源于类似工具和学术界对高效参考管理的需要。
->>>>>>> adfe436 (Release v1.8: cleanup + new assets)

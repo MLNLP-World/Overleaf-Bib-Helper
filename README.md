@@ -1,9 +1,3 @@
-<<<<<<< HEAD
-# Repository Migration Notice
-This repository has been migrated to the MLNLP community. The new repository address is: [https://github.com/MLNLP-World/Overleaf-Bib-Helper](https://github.com/MLNLP-World/Overleaf-Bib-Helper).
-
-Please visit the new repository to obtain the latest code updates, submit issues, and contribute code. Thank you for your support and understanding! 
-=======
 <div align="center">
   <img src="figure/logo-v2.svg" width="50" />
   <h1>Overleaf-Bib-Helper</h1>
@@ -20,7 +14,7 @@ Please visit the new repository to obtain the latest code updates, submit issues
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/releases">
     <img alt="Version" src="https://img.shields.io/badge/Version-1.8-blue" />
   </a>
-  <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/blob/main/LICENSE.md">
+  <a href="LICENSE">
     <img alt="License" src="https://img.shields.io/badge/License-MIT-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/stargazers">
@@ -42,23 +36,20 @@ Please visit the new repository to obtain the latest code updates, submit issues
 <div>
 <p align="center">
       <a href="README-ZH.md">中文文档</a> •
-      <a href="#Installation">Installation</a> •
-      <a href="#Usage">Usage</a> •
-      <a href="#Supported-Sources">Supported Sources</a> •
-      <a href="#Troubleshooting">Troubleshooting</a> •
-      <a href="#Disclaimer">Disclaimer</a> •
-      <a href="#Changelog">Changelog</a> •
-      <a href="#License">License</a> •
-      <a href="#Contributing">Contributing</a> •
-      <a href="#Contact">Contact</a> •
-      <a href="#Organizers">Organizers</a> •
-      <a href="#Contributors">Contributors</a> •
-      <a href="#Acknowledgments">Acknowledgments</a>
+      <a href="#installation">Installation</a> •
+      <a href="#usage">Usage</a> •
+      <a href="#supported-sources">Supported Sources</a> •
+      <a href="#troubleshooting">Troubleshooting</a> •
+      <a href="#disclaimer">Disclaimer</a> •
+      <a href="#changelog">Changelog</a> •
+      <a href="#license">License</a> •
+      <a href="#contributing">Contributing</a> •
+      <a href="#contact">Contact</a> •
+      <a href="#organizers">Organizers</a> •
+      <a href="#contributors">Contributors</a> •
+      <a href="#acknowledgments">Acknowledgments</a>
     </p>
 </div>
-
-
-
 
 ## Motivation
 Writing LaTeX documents often requires including numerous academic references. Manually searching for and formatting BibTeX entries can be time-consuming. Overleaf-Bib-Helper streamlines this process by integrating search functionality from DBLP and Google Scholar right into the Overleaf interface, allowing users to quickly find and copy BibTeX entries with minimal effort.
@@ -84,7 +75,6 @@ Tampermonkey is a browser extension required to run UserScripts like Overleaf-Bi
    - **Safari**: [App Store](https://apps.apple.com/us/app/tampermonkey/id1482490089) (requires macOS)
 2. **Enable Tampermonkey**:
    - After installation, click the Tampermonkey icon in your browser’s toolbar and ensure it’s enabled.
-   - Note: 
 3. **Enable Developer Mode for the Extension**:
    - For Chrome, go to the extensions page (`chrome://extensions/`) and enable Developer mode.
 
@@ -167,20 +157,19 @@ While Overleaf-Bib-Helper aims to provide a seamless experience, please note tha
 - **2025-04-09**: Initial release with basic functionality for DBLP and Google Scholar (v1.1).
 
 ## License
-This project is licensed under the MIT License - see [LICENSE.md](https://github.com/MLNLP-World/Overleaf-Bib-Helper/blob/main/LICENSE.md) for details.
+This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
 
 ## Contributing
-Feel free to fork the [GitHub repository](https://github.com/MLNLP-World/Overleaf-Bib-Helper), submit issues, or create pull requests with improvements! 
+Feel free to fork the [GitHub repository](https://github.com/MLNLP-World/Overleaf-Bib-Helper), submit issues, or create pull requests with improvements!
 
 ## Contact
-Please email [Xunjian Yin](mailto:xjyin@pku.edu.cn) or create Github issues here if you have any questions or suggestions. 
+Please email [Xunjian Yin](mailto:xjyin@pku.edu.cn) or create Github issues here if you have any questions or suggestions.
 
 ## Organizers
-<a href="https://github.com/Arvid-pku">  <img src="https://avatars.githubusercontent.com/u/53811705?s=96&v=4"  width="55" > </a> 
+<a href="https://github.com/Arvid-pku">  <img src="https://avatars.githubusercontent.com/u/53811705?s=96&v=4"  width="55" > </a>
 
 ## Contributors
-<a href="https://github.com/Arvid-pku">  <img src="https://avatars.githubusercontent.com/u/53811705?s=96&v=4"  width="55" > </a> 
+<a href="https://github.com/Arvid-pku">  <img src="https://avatars.githubusercontent.com/u/53811705?s=96&v=4"  width="55" > </a>
 
 ## Acknowledgments
 Inspired by similar tools and the academic community’s need for efficient reference management.
->>>>>>> adfe436 (Release v1.8: cleanup + new assets)
