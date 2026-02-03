@@ -41,7 +41,6 @@
       <a href="#贡献">贡献</a> •
       <a href="#联系方式">联系方式</a> •
       <a href="#组织者">组织者</a> •
-      <a href="#贡献者">贡献者</a> •
       <a href="#致谢">致谢</a>
     </p>
 </div>
@@ -161,9 +160,6 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 如有任何问题或建议，请发送电子邮件至[Xunjian Yin](mailto:xjyin@pku.edu.cn)或在此处创建Github问题。
 
 ## 组织者
-<a href="https://github.com/Arvid-pku">  <img src="https://avatars.githubusercontent.com/u/53811705?s=96&v=4"  width="55" > </a>
-
-## 贡献者
 <a href="https://github.com/Arvid-pku">  <img src="https://avatars.githubusercontent.com/u/53811705?s=96&v=4"  width="55" > </a>
 
 ## 致谢

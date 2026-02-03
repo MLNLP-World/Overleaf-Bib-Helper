@@ -46,7 +46,6 @@
       <a href="#contributing">Contributing</a> •
       <a href="#contact">Contact</a> •
       <a href="#organizers">Organizers</a> •
-      <a href="#contributors">Contributors</a> •
       <a href="#acknowledgments">Acknowledgments</a>
     </p>
 </div>
@@ -166,9 +165,6 @@ Feel free to fork the [GitHub repository](https://github.com/MLNLP-World/Overlea
 Please email [Xunjian Yin](mailto:xjyin@pku.edu.cn) or create Github issues here if you have any questions or suggestions.
 
 ## Organizers
-<a href="https://github.com/Arvid-pku">  <img src="https://avatars.githubusercontent.com/u/53811705?s=96&v=4"  width="55" > </a>
-
-## Contributors
 <a href="https://github.com/Arvid-pku">  <img src="https://avatars.githubusercontent.com/u/53811705?s=96&v=4"  width="55" > </a>
 
 ## Acknowledgments
