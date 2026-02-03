@@ -1,5 +1,11 @@
+<<<<<<< HEAD
+# Repository Migration Notice
+This repository has been migrated to the MLNLP community. The new repository address is: [https://github.com/MLNLP-World/Overleaf-Bib-Helper](https://github.com/MLNLP-World/Overleaf-Bib-Helper).
+
+Please visit the new repository to obtain the latest code updates, submit issues, and contribute code. Thank you for your support and understanding! 
+=======
 <div align="center">
-  <img src="figure/logo.png" width="50" />
+  <img src="figure/logo-v2.svg" width="50" />
   <h1>Overleaf-Bib-Helper</h1>
 </div>
 
@@ -12,7 +18,7 @@
     <img alt="Install from Greasy Fork" src="https://img.shields.io/badge/Install-Greasy_Fork-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/releases">
-    <img alt="Version" src="https://img.shields.io/badge/Version-1.3-blue" />
+    <img alt="Version" src="https://img.shields.io/badge/Version-1.8-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/blob/main/LICENSE.md">
     <img alt="License" src="https://img.shields.io/badge/License-MIT-blue" />
@@ -60,16 +66,13 @@ Writing LaTeX documents often requires including numerous academic references. M
 ## Features
 - Search for academic articles from DBLP or Google Scholar within Overleaf.
 - Retrieve and copy BibTeX entries with a single click.
+- Group same-title results into “Versions (n)” with “Copy best”.
+- Prefer conference/journal (“Published”) vs arXiv/CoRR (“Preprint”) BibTeX on DBLP.
+- Year-range filter and ordering controls (relevance/newest/oldest, depending on source).
 - Configurable result counts (5, 10, 20, or 50 results).
 - Scrollable results list for easy browsing.
 - Keyboard shortcuts: Enter to search, Esc to close the popup.
 - Supports multiple Google Scholar mirrors for accessibility.
-
-## Changelog
-- **2025-04-14**: Added support for advanced search options in Google Scholar (v1.3).
-- **2025-04-10**: Added support for cn.overleaf.com and cn.overleaf.com domains (v1.2).
-- **2025-04-09**: Initial release with basic functionality for DBLP and Google Scholar (v1.1).
-
 
 ## Installation
 ### Step 1: Install Tampermonkey
@@ -112,7 +115,7 @@ You can install the script in one of two ways:
 3. Click the icon to open the search popup.
 
 <div align="center">
-<img src="figure/instruction.jpg" width="180" />
+<img src="figure/instruction.png" width="180" />
 </div>
 
 ### Searching for Articles
@@ -157,6 +160,11 @@ You can install the script in one of two ways:
 ## Disclaimer
 While Overleaf-Bib-Helper aims to provide a seamless experience, please note that it relies on external services (DBLP and Google Scholar) which may change their APIs or require user verification (e.g., CAPTCHA). Use this tool at your own discretion and always verify retrieved BibTeX entries before including them in your documents.
 
+## Changelog
+- **2026-02-03**: Code cleanup, MutationObserver-based injection, expanded `@connect` for custom Scholar mirrors (v1.8).
+- **2026-02-03**: Overleaf-themed UI, Google Scholar as default, grouped “Versions (n)” results, mirror selector + pagination, plus ordering & year-range filters and DBLP version preference (v1.7).
+- **2025-04-10**: Added support for cn.overleaf.com and cn.overleaf.com domains (v1.2).
+- **2025-04-09**: Initial release with basic functionality for DBLP and Google Scholar (v1.1).
 
 ## License
 This project is licensed under the MIT License - see [LICENSE.md](https://github.com/MLNLP-World/Overleaf-Bib-Helper/blob/main/LICENSE.md) for details.
@@ -172,9 +180,7 @@ Please email [Xunjian Yin](mailto:xjyin@pku.edu.cn) or create Github issues here
 
 ## Contributors
 <a href="https://github.com/Arvid-pku">  <img src="https://avatars.githubusercontent.com/u/53811705?s=96&v=4"  width="55" > </a> 
-<a href="https://github.com/QAbot-zh">  <img src="https://avatars.githubusercontent.com/u/40236765?v=4"  width="55" > </a> 
-
 
 ## Acknowledgments
 Inspired by similar tools and the academic community’s need for efficient reference management.
-
+>>>>>>> adfe436 (Release v1.8: cleanup + new assets)
