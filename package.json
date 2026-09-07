@@ -1,0 +1,13 @@
+{
+  "name": "overleaf-bib-helper",
+  "version": "2.0.1",
+  "private": true,
+  "description": "Browser regression checks for the Overleaf Bib Helper userscript",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

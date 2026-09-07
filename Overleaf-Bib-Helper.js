@@ -1,36 +1,48 @@
 // ==UserScript==
 // @name         Overleaf-Bib-Helper
 // @namespace    com.Xunjian.overleaf
-// @version      1.8
+// @version      2.0.1
 // @description  Enhances Overleaf by allowing article searches and BibTeX retrieval from DBLP and Google Scholar
 // @author       Xunjian Yin
 // @match        https://www.overleaf.com/project/*
+// @match        https://overleaf.com/project/*
 // @match        https://cn.overleaf.com/project*
 // @match        https://latex.pku.edu.cn/project/*
 // @icon         https://www.overleaf.com/favicon.ico
-// @require      https://cdn.jsdelivr.net/npm/@floating-ui/core@1.6.8
-// @require      https://cdn.jsdelivr.net/npm/@floating-ui/dom@1.6.12
-// @require      https://cdn.jsdelivr.net/npm/simple-notify@1.0.6/dist/simple-notify.min.js
-// @resource     notifycss   https://cdn.jsdelivr.net/npm/simple-notify@1.0.6/dist/simple-notify.min.css
+// @run-at       document-idle
+// @noframes
 // @grant        GM_setClipboard
 // @grant        GM_xmlhttpRequest
-// @grant        GM_getResourceText
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_openInTab
+// @grant        GM_registerMenuCommand
+// @homepageURL  https://github.com/MLNLP-World/Overleaf-Bib-Helper
+// @supportURL   https://github.com/MLNLP-World/Overleaf-Bib-Helper/issues
+// @downloadURL  https://update.greasyfork.org/scripts/532304/Overleaf-Bib-Helper.user.js
+// @updateURL    https://update.greasyfork.org/scripts/532304/Overleaf-Bib-Helper.meta.js
 // @connect      *
 // @license      MIT
 // ==/UserScript==
 
 let showBox = false;
 let injectInProgress = false;
-let floatingCleanup = null;
 let stylesInjected = false;
 let injectScheduled = false;
 let injectionWatcherStarted = false;
+let searchSequence = 0;
+let previewSequence = 0;
+let copySequence = 0;
+let focusBeforePopup = null;
+const bibCache = new Map();
 
-const TOOLBAR_SELECTOR = 'div.ol-cm-toolbar-button-group.ol-cm-toolbar-end';
+// Overleaf's hosted redesign and older/self-hosted editor layouts coexist.
+const TOOLBAR_SELECTORS = [
+    '.ol-toolbar-layout-right',
+    '.ol-cm-toolbar-button-group.ol-cm-toolbar-end',
+    '.ide-redesign-toolbar-actions',
+];
 
 const DEFAULT_SCHOLAR_ORIGINS = [
     "https://scholar.google.com",
@@ -66,6 +78,7 @@ function parseCssColorToRgb(color) {
 
     const rgbMatch = raw.match(/^rgba?\(\s*([0-9.]+)[, ]+([0-9.]+)[, ]+([0-9.]+)(?:\s*[,/]\s*([0-9.]+))?\s*\)$/i);
     if (rgbMatch) {
+        if (rgbMatch[4] !== undefined && Number.parseFloat(rgbMatch[4]) === 0) return null;
         const r = clampByte(Number.parseFloat(rgbMatch[1]));
         const g = clampByte(Number.parseFloat(rgbMatch[2]));
         const b = clampByte(Number.parseFloat(rgbMatch[3]));
@@ -133,6 +146,23 @@ function injectObhStyles() {
     if (stylesInjected) return;
     stylesInjected = true;
     GM_addStyle(`
+        #obh-toggle-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            flex: 0 0 auto;
+            height: 28px;
+            min-width: 48px;
+            margin: 0 4px;
+            padding: 0 6px;
+            border: 1px solid currentColor;
+            border-radius: 4px;
+            background: transparent;
+            color: inherit;
+            font: 12px/1.2 system-ui, sans-serif;
+            cursor: pointer;
+        }
         .obh-toggle svg { fill: currentColor; }
         .obh-toggle.obh-active { color: var(--obh-brand, rgb(${FALLBACK_BRAND_RGB.r}, ${FALLBACK_BRAND_RGB.g}, ${FALLBACK_BRAND_RGB.b})); }
 
@@ -154,23 +184,23 @@ function injectObhStyles() {
                 "Segoe UI Emoji";
 
             box-sizing: border-box;
-            width: 380px;
+            width: min(600px, calc(100vw - 24px));
+            max-height: calc(100vh - 24px);
+            overflow: auto;
             padding: 12px;
             background: var(--obh-bg);
             color: var(--obh-fg);
             border: 1px solid var(--obh-border);
-            border-radius: 14px;
-            box-shadow: var(--obh-shadow);
+            border-radius: 6px;
             font-family: var(--obh-font);
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
             display: none;
             z-index: 2147483647;
         }
 
-        @media (prefers-color-scheme: dark) {
-            .obh-popup {
+        .obh-popup[data-theme="dark"] {
                 --obh-bg: #0b1220;
                 --obh-fg: #e5e7eb;
                 --obh-muted: #9ca3af;
@@ -180,10 +210,38 @@ function injectObhStyles() {
                 --obh-input-bg: rgba(15, 23, 42, 0.8);
                 --obh-danger: #f97066;
                 --obh-success: #32d583;
-            }
         }
 
         .obh-popup * { box-sizing: border-box; }
+        .obh-popup [hidden] { display: none !important; }
+        .obh-popup button, .obh-popup input, .obh-popup select, .obh-popup textarea { font-family: inherit; }
+        .obh-popup input { min-width: 0; }
+        .obh-popup button:focus-visible, #obh-toggle-icon:focus-visible, .obh-popup summary:focus-visible {
+            outline: 2px solid var(--obh-brand, #138a07);
+            outline-offset: 2px;
+        }
+        .obh-popup .obh-icon-button, .obh-popup .obh-search-input, .obh-popup .obh-primary-button,
+        .obh-popup .obh-select, .obh-popup .obh-year-input, .obh-popup .obh-status, .obh-popup .obh-results {
+            border-radius: 4px;
+        }
+        .obh-advanced { margin-top: 10px; font-size: 12px; }
+        .obh-advanced summary { cursor: pointer; color: var(--obh-muted); }
+        .obh-result-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+        .obh-result-title { overflow-wrap: anywhere; }
+        .obh-popup .obh-result-action { border-radius: 4px; opacity: 1; line-height: 1.5; font: inherit; font-size: 11px; }
+        .obh-preview { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--obh-border); }
+        .obh-preview label { display: block; font-size: 12px; margin: 8px 0 4px; }
+        .obh-preview textarea {
+            display: block; width: 100%; height: 190px; resize: vertical; padding: 8px;
+            font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+            color: var(--obh-fg); background: var(--obh-input-bg); border: 1px solid var(--obh-border);
+        }
+        .obh-preview .obh-result-actions { margin-top: 8px; }
+        @media (max-width: 440px) {
+            .obh-group-header, .obh-result { flex-wrap: wrap; }
+            .obh-result-main { flex-basis: 100%; }
+        }
+        @media (prefers-reduced-motion: reduce) { .obh-status-loading::before { animation: none; } }
 
         .obh-header {
             display: flex;
@@ -543,33 +601,44 @@ function setCurrentScholarOrigin(origin) {
 (function () {
     'use strict';
     initBrandTheme();
-    const notifyCss = GM_getResourceText('notifycss');
-    if (notifyCss) GM_addStyle(notifyCss);
     injectObhStyles();
     registerGlobalShortcuts();
+    if (typeof GM_registerMenuCommand === 'function') {
+        GM_registerMenuCommand('Open Bib Helper (Alt+Shift+B)', openHelper);
+    }
     startInjectionWatcher();
 })();
 
+function isVisible(el) {
+    if (!el?.isConnected) return false;
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+}
+
 function registerGlobalShortcuts() {
-    document.addEventListener('keydown', (env) => {
-        if (env.key !== 'Escape' || !showBox) return;
-        const popupBox = document.getElementById('obh-popup');
-        if (!popupBox) return;
-        togglePopup(popupBox);
-        env.preventDefault();
-        env.stopPropagation();
+    document.addEventListener('keydown', (event) => {
+        if (event.isComposing) return;
+        if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && event.code === 'KeyB') {
+            event.preventDefault();
+            event.stopPropagation();
+            openHelper();
+        } else if (event.key === 'Escape' && showBox) {
+            togglePopup(document.getElementById('obh-popup'), false);
+            event.preventDefault();
+            event.stopPropagation();
+        }
     }, true);
 
-    document.addEventListener('pointerdown', (env) => {
+    document.addEventListener('pointerdown', (event) => {
         if (!showBox) return;
-        const popupBox = document.getElementById('obh-popup');
-        const iconBox = document.getElementById('obh-toggle-icon');
-        if (!popupBox || !iconBox) return;
-        const target = env.target;
-        if (!(target instanceof Node)) return;
-        if (popupBox.contains(target) || iconBox.contains(target)) return;
-        togglePopup(popupBox);
+        const popup = document.getElementById('obh-popup');
+        const icon = document.getElementById('obh-toggle-icon');
+        if (popup?.contains(event.target) || icon?.contains(event.target)) return;
+        togglePopup(popup, false, false);
     }, true);
+    window.addEventListener('resize', () => { scheduleEnsureInjected(); positionPopup(); });
+    document.addEventListener('scroll', positionPopup, true);
 }
 
 function startInjectionWatcher() {
@@ -579,11 +648,17 @@ function startInjectionWatcher() {
         return;
     }
     injectionWatcherStarted = true;
-
     scheduleEnsureInjected();
-
-    const observer = new MutationObserver(() => scheduleEnsureInjected());
-    observer.observe(document.body, { childList: true, subtree: true });
+    const observer = new MutationObserver((records) => {
+        // Ignore our own result rendering and position updates.
+        if (records.some(record => !record.target.closest?.('#obh-popup, #obh-toggle-icon'))) {
+            scheduleEnsureInjected();
+        }
+    });
+    observer.observe(document.body, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ['class', 'style', 'hidden'],
+    });
 }
 
 function scheduleEnsureInjected() {
@@ -596,113 +671,167 @@ function scheduleEnsureInjected() {
 }
 
 function ensureInjected() {
-    if (injectInProgress) return;
-    const toolbar = document.querySelector(TOOLBAR_SELECTOR);
-    if (!toolbar) return;
-    if (document.getElementById('obh-toggle-icon')) return;
-    injectUi(toolbar);
+    if (injectInProgress || !document.body) return;
+    let toolbar = null;
+    for (const selector of TOOLBAR_SELECTORS) {
+        toolbar = Array.from(document.querySelectorAll(selector)).find(isVisible);
+        if (toolbar) break;
+    }
+    if (toolbar) injectUi(toolbar);
+    if (showBox) positionPopup();
 }
 
-function injectUi(toolbarEl) {
-    if (injectInProgress) return;
+function getPopup() {
+    let popup = document.getElementById('obh-popup');
+    if (!popup) {
+        popup = createBox();
+        document.body.appendChild(popup);
+        bindPopupEvents(popup);
+    }
+    return popup;
+}
+
+function injectUi(toolbar) {
     injectInProgress = true;
     try {
-        initBrandTheme();
-
-        const iconBox = createToggleIcon();
-        toolbarEl.appendChild(iconBox);
-
-        let popupBox = document.getElementById('obh-popup');
-        if (!popupBox) {
-            popupBox = createBox();
-        }
-        if (!popupBox.isConnected) {
-            document.body.appendChild(popupBox);
-        }
-
-        floatingCleanup?.();
-        floatingCleanup = FloatingUIDOM.autoUpdate(iconBox, popupBox, () => {
-            FloatingUIDOM.computePosition(iconBox, popupBox, {
-                middleware: [FloatingUICore.shift(), FloatingUICore.flip(), FloatingUICore.offset(6)],
-            }).then(({ x, y }) => {
-                Object.assign(popupBox.style, { top: `${y}px`, left: `${x}px` });
+        let icon = document.getElementById('obh-toggle-icon');
+        if (!icon) {
+            icon = createToggleIcon();
+            // CodeMirror handles bubbled mouse presses as editor selection gestures.
+            icon.addEventListener('pointerdown', event => event.stopPropagation());
+            icon.addEventListener('mousedown', event => {
+                event.preventDefault();
+                event.stopPropagation();
             });
-        });
-
-        iconBox.onclick = () => togglePopup(popupBox);
-
-        const closeButton = popupBox.querySelector('#obh-close');
-        if (closeButton) closeButton.onclick = () => togglePopup(popupBox);
-
-        const searchButton = popupBox.querySelector('#obh-search-word');
-        const searchInput = popupBox.querySelector('#obh-search-input');
-        if (searchButton) searchButton.onclick = () => queryArticle();
-        if (searchInput) {
-            searchInput.onkeydown = (env) => {
-                if (env.key === 'Enter') queryArticle();
+            icon.onclick = event => {
+                event.stopPropagation();
+                togglePopup(getPopup());
             };
         }
-
-        const content = popupBox.querySelector('#obh-search-content');
-        if (content) {
-            content.onclick = (env) => {
-                const target = env.target instanceof Element ? env.target : env.target?.parentElement;
-                if (!target) return;
-
-                const actionEl = target.closest?.('[data-obh-action]');
-                if (actionEl) {
-                    const action = actionEl.getAttribute('data-obh-action');
-                    const groupEl = actionEl.closest?.('.obh-group');
-                    if (!groupEl) return;
-
-                    if (action === 'toggle-versions') {
-                        toggleGroupVersions(groupEl);
-                        return;
-                    }
-                    if (action === 'copy-best') {
-                        const source = groupEl.dataset.bestSource;
-                        const cid = groupEl.dataset.bestCid;
-                        copyBibToClipboard(source, cid, groupEl.querySelector('.obh-group-header'));
-                        return;
-                    }
-                }
-
-                const groupHeader = target.closest?.('.obh-group-header');
-                if (groupHeader) {
-                    const groupEl = groupHeader.closest?.('.obh-group');
-                    if (!groupEl) return;
-                    toggleGroupVersions(groupEl);
-                    return;
-                }
-
-                const item = target.closest?.('.obh-result');
-                if (!item) return;
-                copyBibToClipboard(item.dataset.source, item.dataset.cid, item);
-            };
-        }
+        // React may replace or hide its toolbar when switching files/layouts.
+        if (icon.parentElement !== toolbar) toolbar.appendChild(icon);
+        icon.classList.toggle('obh-active', showBox);
+        icon.setAttribute('aria-expanded', String(showBox));
     } finally {
         injectInProgress = false;
     }
 }
 
-function togglePopup(popupBox) {
-    showBox = !showBox;
-    popupBox.style.display = showBox ? 'block' : 'none';
-    document.getElementById('obh-toggle-icon')?.classList.toggle('obh-active', showBox);
-    if (showBox) {
-        const input = popupBox.querySelector('.obh-search-input');
-        input?.focus();
-        input?.select?.();
-        if (!document.getElementById('obh-search-content')?.children?.length) {
-            const source = popupBox.querySelector('#obh-source')?.value ?? 'GoogleScholar';
-            setStatus(document.getElementById('obh-status'), 'info', source === 'GoogleScholar'
-                ? 'Tip: If Scholar fails, switch mirror or complete CAPTCHA in the opened tab.'
-                : 'Tip: Prefer published to avoid arXiv/CoRR versions.');
+function bindPopupEvents(popup) {
+    popup.querySelector('#obh-close').onclick = () => togglePopup(popup, false);
+    popup.querySelector('#obh-search-word').onclick = () => queryArticle();
+    popup.querySelector('#obh-search-input').onkeydown = (event) => {
+        if (event.key === 'Enter' && !event.isComposing) {
+            event.preventDefault();
+            queryArticle();
         }
+    };
+    popup.querySelector('.obh-advanced').ontoggle = positionPopup;
+    popup.querySelector('#obh-search-content').onclick = (event) => {
+        const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+        if (!target || target.closest('a')) return;
+        const action = target.closest('[data-obh-action]');
+        const group = target.closest('.obh-group');
+        const item = target.closest('.obh-result');
+        if (action?.dataset.obhAction === 'toggle-versions') {
+            toggleGroupVersions(group);
+            return;
+        }
+        if (action) {
+            const source = item?.dataset.source ?? group?.dataset.bestSource;
+            const cid = item?.dataset.cid ?? group?.dataset.bestCid;
+            const origin = item?.dataset.origin ?? group?.dataset.origin;
+            if (action.dataset.obhAction === 'preview') {
+                previewBib(source, cid, origin);
+            } else {
+                copyBibToClipboard(source, cid, item ?? group?.querySelector('.obh-group-header'), origin);
+            }
+        } else if (item) {
+            copyBibToClipboard(item.dataset.source, item.dataset.cid, item, item.dataset.origin);
+        } else if (target.closest('.obh-group-header')) {
+            toggleGroupVersions(group);
+        }
+    };
+    popup.querySelector('#obh-close-preview').onclick = () => {
+        previewSequence++;
+        popup.querySelector('#obh-preview').hidden = true;
+        positionPopup();
+    };
+    popup.querySelector('#obh-citation-key').onchange = () => {
+        try {
+            const area = popup.querySelector('#obh-bib-preview');
+            area.value = replaceCitationKey(area.value, popup.querySelector('#obh-citation-key').value.trim());
+            setStatus(popup.querySelector('#obh-preview-status'), 'success', 'Citation key updated.');
+        } catch (error) {
+            setStatus(popup.querySelector('#obh-preview-status'), 'error', error.message);
+        }
+    };
+    popup.querySelector('#obh-bib-preview').oninput = () => {
+        popup.querySelector('#obh-citation-key').value = citationKey(popup.querySelector('#obh-bib-preview').value);
+    };
+    for (const mode of ['preview', 'key', 'cite']) {
+        popup.querySelector(`#obh-copy-${mode}`).onclick = () => copyPreview(mode);
+    }
+    popup.querySelector('#obh-download-bib').onclick = downloadPreview;
+}
+
+function openHelper() {
+    ensureInjected();
+    togglePopup(getPopup(), true);
+}
+
+function togglePopup(popup, visible = !showBox, restoreFocus = true) {
+    if (!popup) return;
+    const opening = visible && !showBox;
+    if (opening) {
+        focusBeforePopup = document.activeElement;
+        const selection = window.getSelection()?.toString().trim();
+        if (selection && selection.length <= 500 && !popup.contains(document.activeElement)) {
+            popup.querySelector('#obh-search-input').value = selection;
+        }
+    }
+    showBox = visible;
+    popup.style.display = visible ? 'block' : 'none';
+    const icon = document.getElementById('obh-toggle-icon');
+    icon?.classList.toggle('obh-active', visible);
+    icon?.setAttribute('aria-expanded', String(visible));
+    if (visible) {
+        initBrandTheme();
+        const editor = Array.from(document.querySelectorAll('.cm-editor')).find(isVisible);
+        const background = editor ? parseCssColorToRgb(getComputedStyle(editor).backgroundColor) : null;
+        popup.dataset.theme = background && (background.r * 0.299 + background.g * 0.587 + background.b * 0.114) < 128 ? 'dark' : 'light';
+        positionPopup();
+        const input = popup.querySelector('#obh-search-input');
+        input.focus();
+        input.select();
+    } else if (restoreFocus && isVisible(focusBeforePopup)) {
+        focusBeforePopup.focus();
     }
 }
 
+function positionPopup() {
+    const popup = document.getElementById('obh-popup');
+    if (!showBox || !popup) return;
+    const icon = document.getElementById('obh-toggle-icon');
+    const rect = isVisible(icon) ? icon.getBoundingClientRect() : null;
+    const width = popup.offsetWidth;
+    const height = popup.offsetHeight;
+    const margin = 12;
+    const x = rect ? rect.right - width : (window.innerWidth - width) / 2;
+    let y = rect ? rect.bottom + 6 : margin;
+    if (rect && y + height > window.innerHeight - margin && rect.top - height - 6 >= margin) {
+        y = rect.top - height - 6;
+    }
+    popup.style.left = `${Math.max(margin, Math.min(x, window.innerWidth - width - margin))}px`;
+    popup.style.top = `${Math.max(margin, Math.min(y, window.innerHeight - height - margin))}px`;
+}
+
 async function queryArticle() {
+    const sequence = ++searchSequence;
+    copySequence++;
+    previewSequence++;
+    const preview = document.getElementById('obh-preview');
+    if (preview) preview.hidden = true;
     const statusEl = document.getElementById("obh-status");
     const resultsEl = document.getElementById("obh-search-content");
     const searchButton = document.getElementById("obh-search-word");
@@ -711,10 +840,12 @@ async function queryArticle() {
 
     const word = (document.getElementById('obh-search-input')?.value ?? "").trim();
     if (!word) {
+        if (searchButton) searchButton.disabled = false;
         setStatus(statusEl, 'info', "Please enter a query.");
         return;
     }
     GM_setValue('lastQuery', word);
+    rememberQuery(word);
 
     const source = document.getElementById("obh-source")?.value ?? "DBLP";
     const resultCount = Number.parseInt(document.getElementById("obh-resultCount")?.value ?? "5", 10) || 5;
@@ -723,6 +854,7 @@ async function queryArticle() {
     let yearFrom = parseYearInput(document.getElementById("obh-yearFrom")?.value);
     let yearTo = parseYearInput(document.getElementById("obh-yearTo")?.value);
     if (yearFrom && yearTo && yearFrom > yearTo) [yearFrom, yearTo] = [yearTo, yearFrom];
+    const origin = getCurrentScholarOrigin();
 
     if (searchButton) searchButton.disabled = true;
     setStatus(statusEl, 'loading', source === "GoogleScholar" ? "Searching Google Scholar..." : "Searching DBLP...");
@@ -730,7 +862,8 @@ async function queryArticle() {
     try {
         const lists = source === "DBLP"
             ? await getArticleIDListDBLP(word, resultCount)
-            : await getArticleIDListGoogleScholar(word, resultCount, { yearFrom, yearTo, sortMode });
+            : await getArticleIDListGoogleScholar(word, resultCount, { yearFrom, yearTo, sortMode, origin });
+        if (sequence !== searchSequence) return;
 
         if (!lists || lists.length === 0) {
             setStatus(statusEl, 'info', "No results found. Try different keywords.");
@@ -738,7 +871,7 @@ async function queryArticle() {
         }
 
         const filtered = source === 'DBLP' ? filterByYearRange(lists, yearFrom, yearTo) : lists;
-        const groups = buildGroupedResults(filtered, source, { versionPref, sortMode });
+        const groups = buildGroupedResults(filtered, source, { versionPref, sortMode }).slice(0, resultCount);
 
         if (!groups || groups.length === 0) {
             setStatus(statusEl, 'info', 'No results match your filters.');
@@ -756,37 +889,34 @@ async function queryArticle() {
         const versionText = `${versionCount} version${versionCount === 1 ? '' : 's'}`;
         const extra = multiVersionCount ? ` • ${multiVersionCount} with versions` : '';
         const warnings = warningCount ? ` • ${warningCount} preprint-only` : '';
-        setStatus(statusEl, 'success', `${paperText}${extra} • ${versionText}${warnings} • Copy best or open Versions(n).`);
+        setStatus(statusEl, 'success', `${paperText}${extra} • ${versionText}${warnings}. Preview to edit the citation key or copy a citation.`);
     } catch (err) {
-        console.log("Error:", err);
-        if (err && err.shouldOpenTab) {
-            setStatus(statusEl, 'error', "Google Scholar requires verification (CAPTCHA). A tab has been opened; complete it and retry.");
-            setTimeout(() => GM_openInTab(getCurrentScholarOrigin()), 600);
-        } else {
-            setStatus(statusEl, 'error', "Request failed. Try another query or mirror.");
-        }
-        new Notify({
-            status: 'error',
-            title: 'Request failed',
-            text: 'Please check your query or try again later.',
-            effect: 'slide',
-            type: 'filled'
-        });
+        if (sequence !== searchSequence) return;
+        showRequestError(err, source, statusEl);
     } finally {
-        if (searchButton) searchButton.disabled = false;
+        if (sequence === searchSequence) {
+            if (searchButton) searchButton.disabled = false;
+            positionPopup();
+        }
     }
 }
 
 function createToggleIcon() {
-    const iconBox = document.createElement('div');
+    const iconBox = document.createElement('button');
+    iconBox.type = 'button';
     iconBox.className = 'ol-cm-toolbar-button obh-toggle';
     iconBox.style.display = 'flex';
     iconBox.style.justifyContent = 'center';
     iconBox.style.alignItems = 'center';
     iconBox.id = 'obh-toggle-icon';
-    iconBox.title = 'Overleaf Bib Helper';
+    iconBox.title = 'Overleaf Bib Helper (Alt+Shift+B)';
     iconBox.setAttribute('aria-label', 'Overleaf Bib Helper');
+    iconBox.setAttribute('aria-controls', 'obh-popup');
+    iconBox.setAttribute('aria-expanded', String(showBox));
+    iconBox.setAttribute('aria-haspopup', 'dialog');
     iconBox.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>';
+    iconBox.querySelector('svg').setAttribute('aria-hidden', 'true');
+    iconBox.append(document.createTextNode('Bib'));
     return iconBox;
 }
 
@@ -799,7 +929,6 @@ function createBox() {
     box.innerHTML = `
         <div class="obh-header">
             <div class="obh-brand">
-                <div class="obh-badge">B</div>
                 <div style="min-width:0;">
                     <div class="obh-title">Bib Helper</div>
                     <div class="obh-subtitle">Search & copy BibTeX in Overleaf</div>
@@ -813,7 +942,8 @@ function createBox() {
         </div>
 
         <div class="obh-search-row">
-            <input id="obh-search-input" class="obh-search-input" placeholder="Title, author, keywords" autocomplete="off" />
+            <input id="obh-search-input" class="obh-search-input" aria-label="Search papers" placeholder="Title, author, keywords" autocomplete="off" list="obh-recent-queries" />
+            <datalist id="obh-recent-queries"></datalist>
             <button id="obh-search-word" class="obh-primary-button" type="button" aria-label="Search">
                 <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
@@ -829,6 +959,10 @@ function createBox() {
                     <option value="GoogleScholar">Google Scholar</option>
                 </select>
             </div>
+        </div>
+        <details class="obh-advanced">
+            <summary>Search options: versions, years, mirror, result count</summary>
+            <div class="obh-controls">
             <div id="obh-versionpref-row" class="obh-control">
                 <label for="obh-versionPref">Version</label>
                 <select id="obh-versionPref" class="obh-select">
@@ -853,9 +987,9 @@ function createBox() {
             <div class="obh-control" style="flex: 1 1 240px; min-width: 240px;">
                 <label>Year range</label>
                 <div class="obh-year-range">
-                    <input id="obh-yearFrom" class="obh-year-input" inputmode="numeric" placeholder="From" />
+                    <input id="obh-yearFrom" class="obh-year-input" aria-label="From year" inputmode="numeric" placeholder="From" />
                     <span class="obh-year-sep">–</span>
-                    <input id="obh-yearTo" class="obh-year-input" inputmode="numeric" placeholder="To" />
+                    <input id="obh-yearTo" class="obh-year-input" aria-label="To year" inputmode="numeric" placeholder="To" />
                 </div>
             </div>
             <div class="obh-control">
@@ -868,12 +1002,31 @@ function createBox() {
                 </select>
             </div>
         </div>
+        </details>
 
-        <div id="obh-status" class="obh-status"></div>
-        <div id="obh-search-content" class="obh-results" role="listbox"></div>
+        <div id="obh-status" class="obh-status" role="status" aria-live="polite"></div>
+        <div id="obh-search-content" class="obh-results" aria-label="Search results"></div>
+
+        <section id="obh-preview" class="obh-preview" aria-label="BibTeX preview" hidden>
+            <div class="obh-header">
+                <strong class="obh-title">BibTeX preview</strong>
+                <button id="obh-close-preview" class="obh-result-action" type="button">Close preview</button>
+            </div>
+            <label for="obh-citation-key">Citation key</label>
+            <input id="obh-citation-key" class="obh-search-input" autocomplete="off" />
+            <label for="obh-bib-preview">BibTeX (editable)</label>
+            <textarea id="obh-bib-preview" spellcheck="false"></textarea>
+            <div class="obh-result-actions">
+                <button id="obh-copy-preview" class="obh-result-action" type="button">Copy BibTeX</button>
+                <button id="obh-copy-key" class="obh-result-action" type="button">Copy key</button>
+                <button id="obh-copy-cite" class="obh-result-action" type="button">Copy \\cite{key}</button>
+                <button id="obh-download-bib" class="obh-result-action" type="button">Download .bib</button>
+            </div>
+            <div id="obh-preview-status" class="obh-status" role="status" aria-live="polite"></div>
+        </section>
 
         <div class="obh-footer">
-            <span>Enter: search</span>
+            <span>Alt+Shift+B: open · Enter: search</span>
             <span>Esc: close</span>
         </div>
     `;
@@ -894,12 +1047,12 @@ function createBox() {
         return box;
     }
 
-    sourceSelect.value = GM_getValue('searchSource', 'GoogleScholar');
+    sourceSelect.value = GM_getValue('searchSource', 'DBLP');
     versionSelect.value = GM_getValue('versionPref', 'published');
     sortSelect.value = GM_getValue('sortMode', 'relevance');
     yearFromInput.value = GM_getValue('yearFrom', '');
     yearToInput.value = GM_getValue('yearTo', '');
-    countSelect.value = GM_getValue('resultCount', '5');
+    countSelect.value = GM_getValue('resultCount', '10');
     searchInput.value = GM_getValue('lastQuery', '');
 
     const refreshOrigins = () => {
@@ -934,10 +1087,11 @@ function createBox() {
     };
 
     sourceSelect.addEventListener('change', () => {
+        invalidateSearch(box);
         GM_setValue('searchSource', sourceSelect.value);
         updateControlVisibility();
         setStatus(statusEl, 'info', sourceSelect.value === 'GoogleScholar'
-            ? 'Tip: If Scholar fails, switch mirror or complete CAPTCHA in the opened tab.'
+            ? 'Scholar may require verification. Use the verification link on errors, or switch to DBLP.'
             : 'Tip: Prefer published to avoid arXiv/CoRR versions.');
     });
     versionSelect.addEventListener('change', () => GM_setValue('versionPref', versionSelect.value));
@@ -959,13 +1113,7 @@ function createBox() {
             const proposed = prompt('Enter a Google Scholar mirror origin (https://...):', getCurrentScholarOrigin());
             const normalized = normalizeOrigin((proposed ?? '').trim());
             if (!normalized) {
-                new Notify({
-                    status: 'error',
-                    title: 'Invalid mirror',
-                    text: 'Please enter a valid https:// origin (no path).',
-                    effect: 'slide',
-                    type: 'filled'
-                });
+                if (proposed !== null) setStatus(statusEl, 'error', 'Please enter a valid https:// mirror origin.');
                 refreshOrigins();
                 return;
             }
@@ -980,8 +1128,9 @@ function createBox() {
 
     refreshOrigins();
     updateControlVisibility();
+    refreshRecentQueries(box);
     setStatus(statusEl, 'info', sourceSelect.value === 'GoogleScholar'
-        ? 'Tip: If Scholar fails, switch mirror or complete CAPTCHA in the opened tab.'
+        ? 'Scholar may require verification. Use the verification link on errors, or switch to DBLP.'
         : 'Tip: Prefer published to avoid arXiv/CoRR versions.');
 
     return box;
@@ -993,6 +1142,7 @@ function setStatus(statusEl, kind, text) {
     const variant = kind ? ` obh-status-${kind}` : '';
     statusEl.className = base + variant;
     statusEl.textContent = text ?? '';
+    positionPopup();
 }
 
 function markCopied(el) {
@@ -1008,34 +1158,183 @@ function toggleGroupVersions(groupEl) {
     if (!toggleEl) return;
     const count = groupEl.dataset.versionCount || '';
     toggleEl.textContent = expanded ? 'Hide versions' : `Versions (${count || '…'})`;
+    toggleEl.setAttribute('aria-expanded', String(expanded));
+    positionPopup();
 }
 
-async function copyBibToClipboard(source, cid, highlightEl) {
+function invalidateSearch(popup) {
+    searchSequence++;
+    copySequence++;
+    previewSequence++;
+    popup.querySelector('#obh-search-content').replaceChildren();
+    popup.querySelector('#obh-search-word').disabled = false;
+    popup.querySelector('#obh-preview').hidden = true;
+}
+
+function refreshRecentQueries(root = document) {
+    const list = root.querySelector('#obh-recent-queries');
+    if (!list) return;
+    const history = GM_getValue('recentQueries', []);
+    list.replaceChildren();
+    for (const query of (Array.isArray(history) ? history : []).filter(q => typeof q === 'string').slice(0, 10)) {
+        const option = document.createElement('option');
+        option.value = query;
+        list.appendChild(option);
+    }
+}
+
+function rememberQuery(query) {
+    const history = GM_getValue('recentQueries', []);
+    GM_setValue('recentQueries', [...new Set([query, ...(Array.isArray(history) ? history : [])])].slice(0, 10));
+    refreshRecentQueries();
+}
+
+function showRequestError(error, source, status = document.getElementById('obh-status')) {
+    setStatus(status, 'error', error?.message || 'Request failed. Please retry.');
+    const verificationUrl = normalizeOrigin(error?.verificationUrl) ? error.verificationUrl : null;
+    if (verificationUrl) {
+        const verify = document.createElement('button');
+        verify.type = 'button';
+        verify.className = 'obh-result-action';
+        verify.textContent = 'Open verification page';
+        verify.onclick = () => GM_openInTab(verificationUrl, { active: true, insert: true });
+        status.appendChild(verify);
+    }
+    if (source === 'GoogleScholar') {
+        const fallback = document.createElement('button');
+        fallback.type = 'button';
+        fallback.className = 'obh-result-action';
+        fallback.textContent = 'Search DBLP instead';
+        fallback.onclick = () => {
+            const select = document.getElementById('obh-source');
+            select.value = 'DBLP';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            queryArticle();
+        };
+        status.appendChild(fallback);
+    }
+    positionPopup();
+}
+
+function fetchBib(source, cid, origin) {
+    if (!cid || !['DBLP', 'GoogleScholar'].includes(source)) return Promise.reject(new Error('Invalid paper.'));
+    const key = JSON.stringify([source, origin || '', cid]);
+    if (bibCache.has(key)) return bibCache.get(key);
+    const pending = Promise.resolve().then(() => source === 'DBLP'
+        ? getBibTexDBLP(cid)
+        : getBibTexGoogleScholar(cid, origin || getCurrentScholarOrigin()))
+        .then(validateBibTeX).catch(error => {
+            if (bibCache.get(key) === pending) bibCache.delete(key);
+            throw error;
+        });
+    bibCache.set(key, pending);
+    if (bibCache.size > 50) bibCache.delete(bibCache.keys().next().value);
+    return pending;
+}
+
+async function copyBibToClipboard(source, cid, highlightEl, origin) {
     if (!source || !cid) return;
+    const sequence = ++copySequence;
+    const status = document.getElementById('obh-status');
+    setStatus(status, 'loading', 'Fetching BibTeX…');
     try {
-        const bib = source === 'DBLP'
-            ? await getBibTexDBLP(cid)
-            : await getBibTexGoogleScholar(cid);
-        GM_setClipboard(bib);
+        const bib = await fetchBib(source, cid, origin);
+        if (sequence !== copySequence) return;
+        await GM_setClipboard(bib, 'text');
         markCopied(highlightEl);
-        new Notify({
-            status: 'success',
-            title: 'Copy successfully',
-            text: 'Bib has been copied to clipboard',
-            effect: 'slide',
-            type: 'filled'
-        });
-    } catch (err) {
-        if (err && err.shouldOpenTab) {
-            setTimeout(() => GM_openInTab(getCurrentScholarOrigin()), 600);
+        setStatus(status, 'success', 'BibTeX copied. Paste it into your .bib file.');
+    } catch (error) {
+        if (sequence === copySequence) showRequestError(error, source, status);
+    }
+}
+
+function citationKey(bib) {
+    try {
+        const { records } = parseBibTeXRecords(bib);
+        return records.length === 1 ? records[0].key : '';
+    } catch { return ''; }
+}
+
+function replaceCitationKey(bib, key) {
+    if (!/^[\p{L}\p{N}_:.+\-/]+$/u.test(key)) {
+        throw new Error('Use letters, numbers, _, :, ., +, -, or / in the citation key.');
+    }
+    const parsed = parseBibTeXRecords(bib);
+    if (parsed.records.length !== 1) throw new Error('Preview supports one BibTeX entry at a time.');
+    const record = parsed.records[0];
+    return parsed.bib.slice(0, record.keyStart) + key + parsed.bib.slice(record.keyEnd);
+}
+
+async function previewBib(source, cid, origin) {
+    const sequence = ++previewSequence;
+    const previewTrigger = document.activeElement;
+    const preview = document.getElementById('obh-preview');
+    const status = document.getElementById('obh-preview-status');
+    const area = document.getElementById('obh-bib-preview');
+    const keyInput = document.getElementById('obh-citation-key');
+    preview.hidden = false;
+    area.value = '';
+    keyInput.value = '';
+    const actions = preview.querySelectorAll('input, textarea, .obh-result-actions button');
+    actions.forEach(el => { el.disabled = true; });
+    setStatus(status, 'loading', 'Loading BibTeX preview…');
+    positionPopup();
+    try {
+        const bib = await fetchBib(source, cid, origin);
+        if (sequence !== previewSequence) return;
+        if (parseBibTeXRecords(bib).records.length !== 1) throw new Error('Preview supports one BibTeX entry at a time.');
+        area.value = bib;
+        keyInput.value = citationKey(bib);
+        actions.forEach(el => { el.disabled = false; });
+        setStatus(status, 'info', 'Edit the key or BibTeX before copying. Add the entry to your .bib file before using its citation.');
+        if (showBox && document.activeElement === previewTrigger) {
+            keyInput.focus();
+            keyInput.scrollIntoView({ block: 'nearest' });
         }
-        new Notify({
-            status: 'error',
-            title: "Copy failed",
-            text: source === 'DBLP' ? "Failed to get BibTeX from DBLP" : "Failed to get BibTeX from Google Scholar",
-            effect: "slide",
-            type: "filled"
-        });
+    } catch (error) {
+        if (sequence === previewSequence) showRequestError(error, source, status);
+    } finally {
+        if (sequence === previewSequence) positionPopup();
+    }
+}
+
+function currentPreviewBib() {
+    const area = document.getElementById('obh-bib-preview');
+    const key = document.getElementById('obh-citation-key').value.trim();
+    const bib = replaceCitationKey(validateBibTeX(area.value), key);
+    area.value = bib;
+    return bib;
+}
+
+async function copyPreview(mode) {
+    const sequence = ++copySequence;
+    const status = document.getElementById('obh-preview-status');
+    try {
+        const bib = currentPreviewBib();
+        const key = citationKey(bib);
+        const text = mode === 'cite' ? `\\cite{${key}}` : mode === 'key' ? key : bib;
+        await GM_setClipboard(text, 'text');
+        if (sequence === copySequence) setStatus(status, 'success', mode === 'preview' ? 'BibTeX copied.' : mode === 'key' ? 'Citation key copied.' : 'Citation command copied.');
+    } catch (error) {
+        setStatus(status, 'error', error.message || 'Copy failed.');
+    }
+}
+
+function downloadPreview() {
+    const status = document.getElementById('obh-preview-status');
+    try {
+        const bib = currentPreviewBib();
+        const url = URL.createObjectURL(new Blob([bib + '\n'], { type: 'application/x-bibtex;charset=utf-8' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = citationKey(bib).replace(/[^a-z0-9_.-]/gi, '_') + '.bib';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setStatus(status, 'success', 'BibTeX file downloaded.');
+    } catch (error) {
+        setStatus(status, 'error', error.message);
     }
 }
 
@@ -1046,8 +1345,8 @@ function normalizeKeyText(text) {
         return raw
             .toLowerCase()
             .normalize('NFKD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^a-z0-9]+/g, ' ')
+            .replace(/\p{M}/gu, '')
+            .replace(/[^\p{L}\p{N}]+/gu, ' ')
             .trim()
             .replace(/\s+/g, ' ');
     } catch {
@@ -1103,10 +1402,7 @@ function orderDblpVersions(versions, versionPref, sortMode) {
     const order = (items) => sortDblpArticles(items, sortMode);
 
     if (versionPref === 'hidePreprints') {
-        const publishedOrdered = order(published);
-        if (publishedOrdered.length > 0) return { ordered: publishedOrdered, note: '' };
-        const preprintsOrdered = order(preprints);
-        return { ordered: preprintsOrdered, note: preprintsOrdered.length ? 'No published versions found; showing preprints.' : '' };
+        return { ordered: order(published), note: '' };
     }
     if (versionPref === 'published') return { ordered: order(published).concat(order(preprints)), note: '' };
     if (versionPref === 'preprint') return { ordered: order(preprints).concat(order(published)), note: '' };
@@ -1140,11 +1436,12 @@ function buildGroupedResults(results, source, { versionPref, sortMode } = {}) {
         group.best = group.versions[0] ?? null;
     }
 
+    const nonemptyGroups = groups.filter(group => group.best);
     if (source === 'DBLP') {
-        return sortGroupsByBestYear(groups, sortMode ?? 'relevance');
+        return sortGroupsByBestYear(nonemptyGroups, sortMode ?? 'relevance');
     }
 
-    return groups;
+    return nonemptyGroups;
 }
 
 function formatVersionMeta(article, source) {
@@ -1165,6 +1462,7 @@ function buildSingleResultRow(article, source) {
     item.className = "obh-result";
     item.dataset.source = source;
     item.dataset.cid = source === "DBLP" ? article.url : article.id;
+    item.dataset.origin = article.origin || '';
 
     const main = document.createElement("div");
     main.className = "obh-result-main";
@@ -1177,14 +1475,25 @@ function buildSingleResultRow(article, source) {
     metaEl.className = "obh-result-meta";
     metaEl.textContent = formatVersionMeta(article, source);
 
-    const action = document.createElement("span");
+    const actions = document.createElement('div');
+    actions.className = 'obh-result-actions';
+    const action = document.createElement("button");
+    action.type = 'button';
+    action.dataset.obhAction = 'copy';
     action.className = "obh-result-action";
     action.textContent = "Copy";
+    const preview = document.createElement('button');
+    preview.type = 'button';
+    preview.className = 'obh-result-action';
+    preview.dataset.obhAction = 'preview';
+    preview.textContent = 'Preview';
+    actions.append(action, preview);
+    appendSourceLink(actions, article, source);
 
     main.appendChild(titleEl);
     main.appendChild(metaEl);
     item.appendChild(main);
-    item.appendChild(action);
+    item.appendChild(actions);
     return item;
 }
 
@@ -1194,6 +1503,7 @@ function buildGroupedResultRow(group) {
     groupEl.dataset.bestSource = group.source;
     groupEl.dataset.bestCid = group.source === 'DBLP' ? (group.best?.url ?? '') : (group.best?.id ?? '');
     groupEl.dataset.versionCount = String(group.versions.length);
+    groupEl.dataset.origin = group.best?.origin || '';
 
     const header = document.createElement("div");
     header.className = "obh-group-header";
@@ -1215,17 +1525,26 @@ function buildGroupedResultRow(group) {
     const actions = document.createElement("div");
     actions.className = "obh-group-actions";
 
-    const copyBest = document.createElement("span");
+    const copyBest = document.createElement("button");
+    copyBest.type = 'button';
     copyBest.className = "obh-result-action";
     copyBest.textContent = "Copy best";
     copyBest.setAttribute("data-obh-action", "copy-best");
 
-    const toggle = document.createElement("span");
+    const toggle = document.createElement("button");
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', 'false');
     toggle.className = "obh-result-action";
     toggle.textContent = `Versions (${group.versions.length})`;
     toggle.setAttribute("data-obh-action", "toggle-versions");
 
     actions.appendChild(copyBest);
+    const preview = document.createElement('button');
+    preview.type = 'button';
+    preview.className = 'obh-result-action';
+    preview.dataset.obhAction = 'preview';
+    preview.textContent = 'Preview';
+    actions.appendChild(preview);
     actions.appendChild(toggle);
 
     header.appendChild(main);
@@ -1250,6 +1569,22 @@ function renderSearchResults(contentEl, groups) {
             contentEl.appendChild(buildGroupedResultRow(group));
         }
     }
+}
+
+function appendSourceLink(container, article, source) {
+    const raw = article.url;
+    if (!raw) return;
+    try {
+        const url = new URL(raw);
+        if (!['https:', 'http:'].includes(url.protocol)) return;
+        const link = document.createElement('a');
+        link.className = 'obh-result-action';
+        link.href = url.href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Source';
+        container.appendChild(link);
+    } catch { /* Some Scholar citation-only records have no source link. */ }
 }
 
 function sanitizeYearInput(value) {
@@ -1304,85 +1639,193 @@ function getDblpVersionKind(article) {
     const url = String(article?.url ?? '').toLowerCase();
     const venue = String(article?.venue ?? '').toLowerCase();
     const type = String(article?.type ?? '').toLowerCase();
-    const title = String(article?.title ?? '').toLowerCase();
 
     if (url.includes('/journals/corr/') || venue === 'corr') return 'preprint';
-    if (venue.includes('arxiv') || title.includes('arxiv')) return 'preprint';
+    if (venue.includes('arxiv')) return 'preprint';
     if (type.includes('informal')) return 'preprint';
     return 'published';
 }
 
 // DBLP Functions
 const dblpOrigin = "https://dblp.org";
-function getArticleIDListDBLP(query, resultCount) {
+
+// All providers share bounded requests. Verification stays an explicit UI action.
+function requestText(url, { timeout = 20000, verificationUrl = '', provider = 'Google Scholar' } = {}) {
     return new Promise((resolve, reject) => {
-        let url = `https://dblp.org/search/publ/api?q=${encodeURIComponent(query)}&h=${resultCount}`;
-        GM_xmlhttpRequest({
-            url: url,
-            method: "GET",
-            onload: response => {
-                let parser = new DOMParser();
-                let doc = parser.parseFromString(response.responseText, 'text/xml');
-                let hits = doc.querySelectorAll('hit');
-                let articlesIDs = [];
-                hits.forEach(hit => {
-                    let info = hit.querySelector('info');
-                    let title = info.querySelector('title')?.textContent ?? '';
-                    let authors = Array.from(info.querySelectorAll('author')).map(a => a.textContent).join(', ');
-                    let venue = info.querySelector('venue')?.textContent ?? '';
-                    let year = info.querySelector('year')?.textContent ?? '';
-                    let type = info.querySelector('type')?.textContent ?? '';
-                    let url = info.querySelector('url')?.textContent ?? '';
-                    articlesIDs.push({
-                        url: url,
-                        title: title,
-                        author: authors,
-                        venue,
-                        year,
-                        type
-                    });
-                });
-                resolve(articlesIDs);
-            },
-            onerror: err => {
-                reject(err);
-            }
-        });
+        const fail = (message, needsVerification = false, status = null) => {
+            const error = new Error(message);
+            error.requestUrl = url;
+            if (status != null) error.httpStatus = status;
+            if (needsVerification && verificationUrl) error.verificationUrl = verificationUrl;
+            reject(error);
+        };
+        try {
+            GM_xmlhttpRequest({
+                url,
+                method: 'GET',
+                timeout,
+                onload: response => {
+                    const status = Number(response.status);
+                    const text = String(response.responseText ?? '');
+                    const needsVerification = Boolean(verificationUrl) &&
+                        (status === 403 || status === 429 || isLikelyScholarVerificationPage(text) ||
+                            /id=["']anubis_challenge|id=["']challenge-form|cf-chl-/i.test(text));
+                    if (needsVerification) {
+                        fail(provider + ' requires verification or is limiting requests. Open the verification page, then retry.', true, status);
+                        return;
+                    }
+                    if (!Number.isFinite(status) || status < 200 || status >= 300) {
+                        fail('Request failed (HTTP ' + (Number.isFinite(status) ? status : 'unknown') + ').', false, status);
+                        return;
+                    }
+                    resolve(text);
+                },
+                ontimeout: () => fail('Request timed out. Please retry or choose another source.'),
+                onabort: () => fail('Request was cancelled.'),
+                onerror: () => fail('Network request failed. Check your connection or choose another source.')
+            });
+        } catch (error) {
+            reject(error);
+        }
     });
+}
+
+// Offsets refer to the trimmed bib string, so key edits preserve every other byte.
+// Auxiliary records and percent comments are never treated as citation entries.
+function parseBibTeXRecords(text) {
+    const bib = String(text ?? '').trim();
+    let cursor = 0;
+    const records = [];
+    const invalid = () => new Error('The source did not return a complete BibTeX entry.');
+    const skipTrivia = () => {
+        while (cursor < bib.length) {
+            if (/\s/.test(bib[cursor])) {
+                cursor++;
+            } else if (bib[cursor] === '%') {
+                const newline = bib.indexOf('\n', cursor);
+                cursor = newline === -1 ? bib.length : newline + 1;
+            } else {
+                break;
+            }
+        }
+    };
+
+    skipTrivia();
+    while (cursor < bib.length) {
+        const recordStart = cursor;
+        const header = /^@([a-z][a-z0-9_-]*)\s*([{(])/i.exec(bib.slice(cursor));
+        if (!header) throw invalid();
+        const type = header[1].toLowerCase();
+        const opening = header[2];
+        const bodyStart = cursor + header[0].length;
+        cursor = bodyStart;
+        let depth = 1;
+        let braceDepth = 0;
+        let quoted = false;
+        let escaped = false;
+
+        for (; cursor < bib.length; cursor++) {
+            const char = bib[cursor];
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (char === '\\') {
+                escaped = true;
+                continue;
+            }
+            if (opening === '{') {
+                if (char === '"' && depth === 1 && type !== 'comment') quoted = !quoted;
+                if (char === '{') depth++;
+                if (char === '}') depth--;
+            } else {
+                if (char === '{') braceDepth++;
+                if (char === '}') {
+                    braceDepth--;
+                    if (braceDepth < 0) throw invalid();
+                }
+                if (char === '"' && braceDepth === 0 && type !== 'comment') quoted = !quoted;
+                if (!quoted && braceDepth === 0) {
+                    if (char === '(') depth++;
+                    if (char === ')') depth--;
+                }
+            }
+            if (depth === 0) break;
+        }
+
+        if (depth !== 0 || braceDepth !== 0 || quoted || escaped) throw invalid();
+        const body = bib.slice(bodyStart, cursor);
+        if (!['comment', 'preamble', 'string'].includes(type)) {
+            const keyMatch = /^\s*([^,\s{}()]+)\s*,/.exec(body);
+            if (!keyMatch || !/\b[a-z][a-z0-9_-]*\s*=/i.test(body.slice(keyMatch[0].length))) throw invalid();
+            const key = keyMatch[1];
+            const keyStart = bodyStart + keyMatch[0].indexOf(key);
+            records.push({ type, key, keyStart, keyEnd: keyStart + key.length, start: recordStart, end: cursor + 1 });
+        }
+        cursor++;
+        skipTrivia();
+    }
+    if (!records.length) throw invalid();
+    return { bib, records };
+}
+
+// Reject HTML/error responses and incomplete records before caching or copying.
+function validateBibTeX(text) {
+    return parseBibTeXRecords(text).bib;
+}
+
+async function getArticleIDListDBLP(query, resultCount) {
+    // Filter and group a bounded candidate set before the UI applies its result limit.
+    const requested = Number.parseInt(resultCount, 10) || 5;
+    const candidateCount = Math.max(40, Math.min(200, requested * 4));
+    const url = dblpOrigin + '/search/publ/api?q=' + encodeURIComponent(query) + '&h=' + candidateCount;
+    const xml = await requestText(url, { verificationUrl: url, provider: 'DBLP' });
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    if (doc.querySelector('parsererror') || doc.documentElement?.localName !== 'result' || !doc.querySelector('hits')) {
+        throw new Error('DBLP returned an invalid search response. Please retry.');
+    }
+
+    const articles = [];
+    for (const hit of doc.querySelectorAll('hit')) {
+        const info = hit.querySelector('info');
+        if (!info) throw new Error('DBLP returned an incomplete publication record.');
+        const title = info.querySelector('title')?.textContent?.trim() ?? '';
+        const publicationURL = info.querySelector('url')?.textContent?.trim() ?? '';
+        if (!title || !getBibTexURLDBLP(publicationURL)) continue;
+        articles.push({
+            url: publicationURL,
+            title,
+            author: Array.from(info.querySelectorAll('author')).map(author => author.textContent?.trim() ?? '').filter(Boolean).join(', '),
+            venue: info.querySelector('venue')?.textContent?.trim() ?? '',
+            year: info.querySelector('year')?.textContent?.trim() ?? '',
+            type: info.querySelector('type')?.textContent?.trim() ?? ''
+        });
+    }
+    return articles;
 }
 
 function getBibTexURLDBLP(publicationURL) {
-    const match = String(publicationURL ?? '').match(/\/rec\/(.+?)(?:\.html)?$/);
-    if (!match) return null;
-    return `${dblpOrigin}/rec/${match[1]}.bib`;
+    try {
+        const url = new URL(String(publicationURL ?? ''), dblpOrigin);
+        if (!/^https?:$/.test(url.protocol) || !/^(?:www\.)?dblp\.(?:org|uni-trier\.de)$/i.test(url.hostname)) return null;
+        const record = url.pathname.match(/^\/rec\/(.+?)(?:\.(?:html|bib))?$/i)?.[1];
+        if (!record || record.endsWith('/')) return null;
+        return dblpOrigin + '/rec/' + record + '.bib';
+    } catch {
+        return null;
+    }
 }
 
-function getBibTexDBLP(publicationURL) {
-    return new Promise((resolve, reject) => {
-        const bibtexURL = getBibTexURLDBLP(publicationURL);
-        if (!bibtexURL) {
-            reject(new Error("Invalid DBLP publication URL"));
-            return;
-        }
-        GM_xmlhttpRequest({
-            url: bibtexURL,
-            method: "GET",
-            onload: response => {
-                if (response.status === 200) {
-                    resolve(response.responseText);
-                } else {
-                    reject(new Error("Failed to fetch BibTeX from DBLP"));
-                }
-            },
-            onerror: err => {
-                reject(err);
-            }
-        });
-    });
+async function getBibTexDBLP(publicationURL) {
+    const bibtexURL = getBibTexURLDBLP(publicationURL);
+    if (!bibtexURL) throw new Error('Invalid DBLP publication URL.');
+    return validateBibTeX(await requestText(bibtexURL, { verificationUrl: bibtexURL, provider: 'DBLP' }));
 }
 
 // Google Scholar Functions
-function scholarURLWithStart(query, start, { yearFrom, yearTo, sortMode } = {}) {
+function scholarURLWithStart(query, start, { yearFrom, yearTo, sortMode, origin = getCurrentScholarOrigin() } = {}) {
+    const resolvedOrigin = normalizeOrigin(origin);
+    if (!resolvedOrigin) throw new Error('Invalid Google Scholar mirror origin.');
     const startValue = Number.isFinite(start) ? Math.max(0, Math.trunc(start)) : 0;
     const params = new URLSearchParams();
     params.set('hl', 'zh-CN');
@@ -1393,11 +1836,19 @@ function scholarURLWithStart(query, start, { yearFrom, yearTo, sortMode } = {}) 
     if (Number.isFinite(yearTo)) params.set('as_yhi', String(yearTo));
     if (sortMode === 'newest') params.set('scisbd', '1');
 
-    return `${getCurrentScholarOrigin()}/scholar?${params.toString()}`;
+    return resolvedOrigin + '/scholar?' + params.toString();
 }
 
-function scholarRefPageURL(id) {
-    return `${getCurrentScholarOrigin()}/scholar?q=info:${id}:scholar.google.com/&output=cite&scirp=1&hl=zh-CN`;
+function scholarRefPageURL(id, origin = getCurrentScholarOrigin()) {
+    const resolvedOrigin = normalizeOrigin(origin);
+    if (!resolvedOrigin) throw new Error('Invalid Google Scholar mirror origin.');
+    const params = new URLSearchParams({
+        q: 'info:' + id + ':scholar.google.com/',
+        output: 'cite',
+        scirp: '1',
+        hl: 'zh-CN'
+    });
+    return resolvedOrigin + '/scholar?' + params.toString();
 }
 
 function sleep(ms) {
@@ -1405,113 +1856,104 @@ function sleep(ms) {
 }
 
 function isLikelyScholarVerificationPage(html, doc) {
-    if (doc?.querySelector?.('form#gs_captcha_f, input[name="captcha"], div#captcha, div.recaptcha')) return true;
-    return /unusual traffic|not a robot|verify you are|gs_captcha/i.test(html);
+    if (doc?.querySelector?.('form#gs_captcha_f, input[name="captcha"], #captcha, .recaptcha, .g-recaptcha')) return true;
+    return /unusual traffic|not a robot|verify you are|gs_captcha|g-recaptcha/i.test(html);
 }
 
-function parseGoogleScholarSearchResults(html) {
+function scholarVerificationError(verificationUrl) {
+    const error = new Error('Google Scholar requires verification. Open the verification link, then retry.');
+    error.verificationUrl = verificationUrl;
+    return error;
+}
+
+function parseGoogleScholarSearchResults(html, origin = getCurrentScholarOrigin()) {
+    const resolvedOrigin = normalizeOrigin(origin);
+    if (!resolvedOrigin) throw new Error('Invalid Google Scholar mirror origin.');
     const doc = new DOMParser().parseFromString(html, 'text/html');
     if (isLikelyScholarVerificationPage(html, doc)) {
-        const err = new Error("Google Scholar may require verification (CAPTCHA).");
-        err.shouldOpenTab = true;
-        throw err;
+        throw scholarVerificationError(resolvedOrigin);
     }
 
-    const searchItems = doc.querySelectorAll('div[data-cid]');
     const results = [];
-    for (const article of searchItems) {
+    for (const article of doc.querySelectorAll('div[data-cid]')) {
         const cid = article.getAttribute('data-cid') || '';
-        if (!cid || cid.startsWith('gs')) continue;
-        const title = article.querySelector("h3")?.textContent?.trim() ?? '';
-        const author = article.querySelector("div.gs_a")?.textContent?.trim() ?? '';
+        if (!cid) continue;
+        const heading = article.querySelector('h3');
+        const title = heading?.textContent?.trim().replace(/^\[(?:PDF|HTML|BOOK|CITATION)\]\s*/i, '') ?? '';
+        const author = article.querySelector('div.gs_a')?.textContent?.trim() ?? '';
         if (!title) continue;
-        results.push({ id: cid, title, author });
+        let publicationURL = '';
+        const href = heading?.querySelector('a[href]')?.getAttribute('href');
+        if (href) {
+            try {
+                const url = new URL(href, resolvedOrigin);
+                if (/^https?:$/.test(url.protocol)) publicationURL = url.href;
+            } catch {
+                // A malformed optional publication link does not invalidate the result.
+            }
+        }
+        results.push({ id: cid, title, author, url: publicationURL, origin: resolvedOrigin });
     }
     return results;
 }
 
-async function fetchScholarSearchPage(query, start, options) {
-    return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            url: scholarURLWithStart(query, start, options),
-            method: "GET",
-            onload: response => resolve(response.responseText),
-            onerror: err => reject(err)
-        });
-    });
+async function fetchScholarSearchPage(query, start, options = {}) {
+    const url = scholarURLWithStart(query, start, options);
+    return requestText(url, { verificationUrl: url });
 }
 
-async function getArticleIDListGoogleScholar(query, resultCount, options) {
+async function getArticleIDListGoogleScholar(query, resultCount, options = {}) {
     const maxResults = Number.parseInt(resultCount, 10) || 5;
     const desired = Math.max(1, Math.min(maxResults, 50));
+    // A later mirror selection must not change pagination or these results' export source.
+    const origin = normalizeOrigin(options.origin ?? getCurrentScholarOrigin());
+    if (!origin) throw new Error('Invalid Google Scholar mirror origin.');
+    const searchOptions = { ...options, origin };
     const seen = new Set();
     const collected = [];
 
     const maxRequests = Math.min(10, Math.ceil(desired / 10) + 2);
     let start = 0;
-
     for (let requestIndex = 0; requestIndex < maxRequests && collected.length < desired; requestIndex++) {
-        const html = await fetchScholarSearchPage(query, start, options);
-        const pageResults = parseGoogleScholarSearchResults(html);
+        const html = await fetchScholarSearchPage(query, start, searchOptions);
+        const pageResults = parseGoogleScholarSearchResults(html, origin);
         if (pageResults.length === 0) break;
 
+        let added = 0;
         for (const item of pageResults) {
             if (seen.has(item.id)) continue;
             seen.add(item.id);
             collected.push(item);
+            added++;
             if (collected.length >= desired) break;
         }
-
+        if (!added || collected.length >= desired) break;
         start += 10;
-        await sleep(250);
+        await sleep(300);
     }
-
     return collected;
 }
 
-function getRefPageGoogleScholar(id) {
-    return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            url: scholarRefPageURL(id),
-            method: "GET",
-            onload: res => {
-                resolve(res.responseText);
-            },
-            onerror: err => {
-                reject(err);
-            }
-        });
-    });
+async function getRefPageGoogleScholar(id, origin = getCurrentScholarOrigin()) {
+    const url = scholarRefPageURL(id, origin);
+    return requestText(url, { verificationUrl: url });
 }
 
-function getBibTexGoogleScholar(id) {
-    return new Promise((resolve, reject) => {
-        getRefPageGoogleScholar(id).then(page => {
-            const doc = new DOMParser().parseFromString(page, "text/html");
-            let firstAnchor = doc.querySelector("#gs_citi>a.gs_citi");
-            if (!firstAnchor) {
-                const err = new Error("Google Scholar may require verification (CAPTCHA).");
-                err.shouldOpenTab = true;
-                throw err;
-            }
-            let first = firstAnchor.href;
-            return GM_xmlhttpRequest({
-                url: first,
-                method: "GET",
-                onload: (res) => {
-                    resolve(res.responseText);
-                },
-                onerror: err => {
-                    reject(err);
-                }
-            });
-        }).catch((err) => {
-            if (err && err.shouldOpenTab) {
-                setTimeout(() => {
-                    GM_openInTab(getCurrentScholarOrigin());
-                }, 1000);
-            }
-            reject(err);
-        });
-    });
+async function getBibTexGoogleScholar(id, origin = getCurrentScholarOrigin()) {
+    const resolvedOrigin = normalizeOrigin(origin);
+    if (!resolvedOrigin) throw new Error('Invalid Google Scholar mirror origin.');
+    const citeURL = scholarRefPageURL(id, resolvedOrigin);
+    const page = await getRefPageGoogleScholar(id, resolvedOrigin);
+    const doc = new DOMParser().parseFromString(page, 'text/html');
+    if (isLikelyScholarVerificationPage(page, doc)) throw scholarVerificationError(citeURL);
+
+    const bibtexAnchor = Array.from(doc.querySelectorAll('a.gs_citi, a[href*="scholar.bib"]')).find(anchor =>
+        /\bBibTeX\b/i.test(anchor.textContent ?? '') || /\/scholar\.bib(?:[?#]|$)/i.test(anchor.getAttribute('href') ?? '')
+    );
+    if (!bibtexAnchor) {
+        throw new Error('Google Scholar did not provide a BibTeX export link. Try another result or mirror.');
+    }
+    const bibtexURL = new URL(bibtexAnchor.getAttribute('href'), citeURL);
+    if (bibtexURL.protocol !== 'https:') throw new Error('Google Scholar returned an invalid BibTeX export URL.');
+    return validateBibTeX(await requestText(bibtexURL.href, { verificationUrl: citeURL }));
 }
