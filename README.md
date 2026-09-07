@@ -12,7 +12,7 @@
     <img alt="Install from Greasy Fork" src="https://img.shields.io/badge/Install-Greasy_Fork-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/releases">
-    <img alt="Version" src="https://img.shields.io/badge/Version-2.0.2-blue" />
+    <img alt="Version" src="https://img.shields.io/badge/Version-2.1.0-blue" />
   </a>
   <a href="LICENSE">
     <img alt="License" src="https://img.shields.io/badge/License-MIT-blue" />
@@ -54,6 +54,7 @@
 Writing LaTeX documents often requires including numerous academic references. Manually searching for and formatting BibTeX entries can be time-consuming. Overleaf-Bib-Helper streamlines this process by integrating search functionality from DBLP and Google Scholar right into the Overleaf interface, allowing users to quickly find and copy BibTeX entries with minimal effort.
 
 ## Features
+- Original official BibTeX from NeurIPS proceedings, PMLR (including ICML), ACL Anthology, and OpenReview, with visible citation provenance and an explicit DBLP fallback.
 - Current and legacy Overleaf toolbar support, including recovery after file and layout changes.
 - Open with **Alt+Shift+B** or the Tampermonkey menu; selected text can prefill the search.
 - Editable BibTeX preview, citation-key editing, copy key or `\cite{key}`, and `.bib` download.
@@ -111,9 +112,10 @@ You can install the script in one of two ways:
 
 ### Searching for Articles
 1. **Enter a Query**: Type your search term (e.g., article title, author, or keywords) into the input field.
-2. **Select Source**: Choose "DBLP" or "Google Scholar" from the "Source" dropdown.
+2. **Select Search**: Choose "DBLP" or "Google Scholar" from the "Search" dropdown.
    - **DBLP**: Best for computer science literature with structured data.
    - **Google Scholar**: Broader coverage across various fields but may require CAPTCHA verification.
+   - With DBLP, **BibTeX → Official venue when available** retrieves the original export from supported official publication links. Choose **DBLP** to use DBLP's export instead.
 3. **Set Result Count**: Select 5, 10, 20, or 50 results from the "Results" dropdown.
 4. **Start Search**:
    - Press the **Enter** key or click the magnifying glass icon.
@@ -125,6 +127,7 @@ You can install the script in one of two ways:
 2. In Preview, change the citation key, copy the BibTeX/key/`\cite{key}`, or download a `.bib` file.
 3. Add the entry to your project’s `.bib` file before pasting its citation command into LaTeX. The helper does not automatically modify project files.
 4. Copy and download validate the edited BibTeX; network errors and verification pages leave the clipboard unchanged.
+5. Each result and preview identifies the BibTeX source. Official exports retain their original keys and fields. A failed official request offers **Use DBLP BibTeX**, which switches the preference and searches again; it does not silently replace or copy the citation.
 
 <div align="center">
 <img src="figure/ui-v2.png" width="600" alt="Bib Helper search and editable BibTeX preview" />
@@ -134,13 +137,24 @@ You can install the script in one of two ways:
 - Press **Esc** or click the toolbar icon again.
 
 ## Supported Sources
-- **DBLP**: A comprehensive computer science bibliography providing reliable BibTeX entries.
+- **DBLP**: Searches across venues and supplies publication links. Search results remain limited to what DBLP has indexed; this is not a full-text search of each conference website.
 - **Google Scholar**: A broader academic search engine that may include more recent or interdisciplinary works but might require user verification (e.g., CAPTCHA).
+
+For DBLP results, the default BibTeX preference reads these official exports:
+
+| Official source | Examples | Export |
+| --- | --- | --- |
+| [NeurIPS proceedings](https://proceedings.neurips.cc/) | NeurIPS / NIPS | The paper page's Bibtex link, including older proceedings and newer tracks |
+| [PMLR](https://proceedings.mlr.press/) | ICML, AISTATS, and other PMLR volumes | Original BibTeX embedded in the paper page |
+| [ACL Anthology](https://aclanthology.org/info/ids/) | ACL, EMNLP, NAACL, Findings | Official `.bib` export, including legacy IDs |
+| [OpenReview](https://github.com/openreview/openreview-web/blob/master/components/forum/ForumNote.js) | ICLR and other indexed conference papers | The provided `_bibtex` field from the official API; no generated substitute |
+
+Unsupported publication links and preprints continue to use DBLP and are labeled accordingly. OpenReview may require browser verification, and some notes have no official export. Submitted, rejected, and withdrawn citations are not accepted as published OpenReview conference versions. NeurIPS, PMLR, and ACL exports have been checked against live official responses; OpenReview's successful response formats are covered by schema-based regression tests because live API requests required verification during validation.
 
 ## Troubleshooting
 - **Script Not Working?**
   - Allow Tampermonkey to run userscripts using **Allow User Scripts** or extension **Developer Mode**.
-  - If the Bib button is missing, try **Alt+Shift+B** or the Tampermonkey menu and verify that you have v2.0.2 installed.
+  - If the Bib button is missing, try **Alt+Shift+B** or the Tampermonkey menu and verify that you have v2.1.0 installed.
   - Ensure Tampermonkey is enabled and the script is active.
   - Verify you’re on an Overleaf project page.
   - Reload or reinstall from Greasy Fork.
@@ -157,6 +171,7 @@ You can install the script in one of two ways:
 While Overleaf-Bib-Helper aims to provide a seamless experience, please note that it relies on external services (DBLP and Google Scholar) which may change their APIs or require user verification (e.g., CAPTCHA). Use this tool at your own discretion and always verify retrieved BibTeX entries before including them in your documents.
 
 ## Changelog
+- **2026-09-07 (v2.1.0)**: Added original official BibTeX retrieval from NeurIPS, PMLR, ACL Anthology, and OpenReview; separate search and citation-source preferences; citation provenance; explicit DBLP fallback; original-field preservation and publication/URL validation. Added official-provider and request-race regression coverage.
 - **2026-09-07 (v2.0.2)**: Simplified the toolbar launcher to borderless **Bib** text, preserving keyboard focus visibility.
 - **2026-09-07 (v2.0.1)**: Current toolbar compatibility and layout recovery; dependency-free startup; shortcut/menu/selection search; recent queries; BibTeX preview/edit/key/citation/download; request timeouts, HTTP/BibTeX validation, stale-search protection, pinned Scholar origins and explicit verification actions; Unicode grouping and strict Hide preprints. Added Playwright regression coverage and GitHub Actions.
 - **2026-02-03**: Code cleanup, MutationObserver-based injection, expanded `@connect` for custom Scholar mirrors (v1.8).

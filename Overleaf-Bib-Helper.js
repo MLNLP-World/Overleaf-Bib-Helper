@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Overleaf-Bib-Helper
 // @namespace    com.Xunjian.overleaf
-// @version      2.0.2
-// @description  Enhances Overleaf by allowing article searches and BibTeX retrieval from DBLP and Google Scholar
+// @version      2.1.0
+// @description  Search papers in Overleaf and retrieve original BibTeX from conference websites, DBLP, or Google Scholar
 // @author       Xunjian Yin
 // @match        https://www.overleaf.com/project/*
 // @match        https://overleaf.com/project/*
@@ -36,6 +36,12 @@ let previewSequence = 0;
 let copySequence = 0;
 let focusBeforePopup = null;
 const bibCache = new Map();
+const OFFICIAL_BIB_LABELS = Object.freeze({
+    NeurIPS: 'NeurIPS proceedings',
+    PMLR: 'PMLR',
+    ACLAnthology: 'ACL Anthology',
+    OpenReview: 'OpenReview',
+});
 
 // Overleaf's hosted redesign and older/self-hosted editor layouts coexist.
 const TOOLBAR_SELECTORS = [
@@ -848,6 +854,7 @@ async function queryArticle() {
     rememberQuery(word);
 
     const source = document.getElementById("obh-source")?.value ?? "DBLP";
+    const bibPreference = document.getElementById('obh-bib-source')?.value ?? 'official';
     const resultCount = Number.parseInt(document.getElementById("obh-resultCount")?.value ?? "5", 10) || 5;
     const versionPref = document.getElementById("obh-versionPref")?.value ?? GM_getValue("versionPref", "published");
     const sortMode = document.getElementById("obh-sort")?.value ?? GM_getValue("sortMode", "relevance");
@@ -878,7 +885,7 @@ async function queryArticle() {
             return;
         }
 
-        renderSearchResults(resultsEl, groups);
+        renderSearchResults(resultsEl, groups, bibPreference);
 
         const paperCount = groups.length;
         const versionCount = groups.reduce((sum, g) => sum + (g.versions?.length ?? 0), 0);
@@ -951,10 +958,17 @@ function createBox() {
 
         <div class="obh-controls">
             <div class="obh-control">
-                <label for="obh-source">Source</label>
+                <label for="obh-source">Search</label>
                 <select id="obh-source" class="obh-select">
                     <option value="DBLP">DBLP</option>
                     <option value="GoogleScholar">Google Scholar</option>
+                </select>
+            </div>
+            <div id="obh-bib-source-row" class="obh-control">
+                <label for="obh-bib-source">BibTeX</label>
+                <select id="obh-bib-source" class="obh-select">
+                    <option value="official">Official venue when available</option>
+                    <option value="search">DBLP</option>
                 </select>
             </div>
         </div>
@@ -1010,6 +1024,7 @@ function createBox() {
                 <strong class="obh-title">BibTeX preview</strong>
                 <button id="obh-close-preview" class="obh-result-action" type="button">Close preview</button>
             </div>
+            <div id="obh-preview-source" class="obh-result-meta"></div>
             <label for="obh-citation-key">Citation key</label>
             <input id="obh-citation-key" class="obh-search-input" autocomplete="off" />
             <label for="obh-bib-preview">BibTeX (editable)</label>
@@ -1030,6 +1045,7 @@ function createBox() {
     `;
 
     const sourceSelect = box.querySelector('#obh-source');
+    const bibSourceSelect = box.querySelector('#obh-bib-source');
     const versionRow = box.querySelector('#obh-versionpref-row');
     const versionSelect = box.querySelector('#obh-versionPref');
     const sortSelect = box.querySelector('#obh-sort');
@@ -1046,6 +1062,7 @@ function createBox() {
     }
 
     sourceSelect.value = GM_getValue('searchSource', 'DBLP');
+    bibSourceSelect.value = GM_getValue('bibSource', 'official') === 'search' ? 'search' : 'official';
     versionSelect.value = GM_getValue('versionPref', 'published');
     sortSelect.value = GM_getValue('sortMode', 'relevance');
     yearFromInput.value = GM_getValue('yearFrom', '');
@@ -1078,6 +1095,7 @@ function createBox() {
         const isScholar = sourceSelect.value === 'GoogleScholar';
         originRow.style.display = isScholar ? 'block' : 'none';
         versionRow.style.display = isScholar ? 'none' : 'block';
+        box.querySelector('#obh-bib-source-row').hidden = isScholar;
 
         const oldestOption = sortSelect.querySelector('option[value="oldest"]');
         if (oldestOption) oldestOption.disabled = isScholar;
@@ -1090,7 +1108,12 @@ function createBox() {
         updateControlVisibility();
         setStatus(statusEl, 'info', sourceSelect.value === 'GoogleScholar'
             ? 'Scholar may require verification. Use the verification link on errors, or switch to DBLP.'
-            : 'Tip: Prefer published to avoid arXiv/CoRR versions.');
+            : 'Find papers with DBLP; use original BibTeX from supported official venues. Each result shows its citation source.');
+    });
+    bibSourceSelect.addEventListener('change', () => {
+        invalidateSearch(box);
+        GM_setValue('bibSource', bibSourceSelect.value);
+        if (searchInput.value.trim()) queryArticle();
     });
     versionSelect.addEventListener('change', () => GM_setValue('versionPref', versionSelect.value));
     sortSelect.addEventListener('change', () => GM_setValue('sortMode', sortSelect.value));
@@ -1129,7 +1152,7 @@ function createBox() {
     refreshRecentQueries(box);
     setStatus(statusEl, 'info', sourceSelect.value === 'GoogleScholar'
         ? 'Scholar may require verification. Use the verification link on errors, or switch to DBLP.'
-        : 'Tip: Prefer published to avoid arXiv/CoRR versions.');
+        : 'Find papers with DBLP; use original BibTeX from supported official venues. Each result shows its citation source.');
 
     return box;
 }
@@ -1211,16 +1234,31 @@ function showRequestError(error, source, status = document.getElementById('obh-s
         };
         status.appendChild(fallback);
     }
+    if (Object.hasOwn(OFFICIAL_BIB_LABELS, source)) {
+        const fallback = document.createElement('button');
+        fallback.type = 'button';
+        fallback.className = 'obh-result-action';
+        fallback.textContent = 'Use DBLP BibTeX';
+        fallback.onclick = () => {
+            const select = document.getElementById('obh-bib-source');
+            select.value = 'search';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        status.appendChild(fallback);
+    }
     positionPopup();
 }
 
 function fetchBib(source, cid, origin) {
-    if (!cid || !['DBLP', 'GoogleScholar'].includes(source)) return Promise.reject(new Error('Invalid paper.'));
+    if (!cid || !['DBLP', 'GoogleScholar'].includes(source) && !Object.hasOwn(OFFICIAL_BIB_LABELS, source)) {
+        return Promise.reject(new Error('Invalid paper.'));
+    }
     const key = JSON.stringify([source, origin || '', cid]);
     if (bibCache.has(key)) return bibCache.get(key);
-    const pending = Promise.resolve().then(() => source === 'DBLP'
-        ? getBibTexDBLP(cid)
-        : getBibTexGoogleScholar(cid, origin || getCurrentScholarOrigin()))
+    const pending = Promise.resolve().then(() => {
+        if (Object.hasOwn(OFFICIAL_BIB_LABELS, source)) return getBibTexOfficial(source, cid);
+        return source === 'DBLP' ? getBibTexDBLP(cid) : getBibTexGoogleScholar(cid, origin || getCurrentScholarOrigin());
+    })
         .then(validateBibTeX).catch(error => {
             if (bibCache.get(key) === pending) bibCache.delete(key);
             throw error;
@@ -1234,13 +1272,13 @@ async function copyBibToClipboard(source, cid, highlightEl, origin) {
     if (!source || !cid) return;
     const sequence = ++copySequence;
     const status = document.getElementById('obh-status');
-    setStatus(status, 'loading', 'Fetching BibTeX…');
+    setStatus(status, 'loading', `Fetching BibTeX from ${bibSourceLabel(source)}…`);
     try {
         const bib = await fetchBib(source, cid, origin);
         if (sequence !== copySequence) return;
         await GM_setClipboard(bib, 'text');
         markCopied(highlightEl);
-        setStatus(status, 'success', 'BibTeX copied. Paste it into your .bib file.');
+        setStatus(status, 'success', `BibTeX copied from ${bibSourceLabel(source)}. Paste it into your .bib file.`);
     } catch (error) {
         if (sequence === copySequence) showRequestError(error, source, status);
     }
@@ -1270,7 +1308,9 @@ async function previewBib(source, cid, origin) {
     const status = document.getElementById('obh-preview-status');
     const area = document.getElementById('obh-bib-preview');
     const keyInput = document.getElementById('obh-citation-key');
+    const sourceEl = document.getElementById('obh-preview-source');
     preview.hidden = false;
+    sourceEl.replaceChildren();
     area.value = '';
     keyInput.value = '';
     const actions = preview.querySelectorAll('input, textarea, .obh-result-actions button');
@@ -1282,6 +1322,15 @@ async function previewBib(source, cid, origin) {
         if (sequence !== previewSequence) return;
         if (parseBibTeXRecords(bib).records.length !== 1) throw new Error('Preview supports one BibTeX entry at a time.');
         area.value = bib;
+        sourceEl.append('BibTeX source: ');
+        const sourceLink = document.createElement('a');
+        sourceLink.textContent = bibSourceLabel(source);
+        if (source !== 'GoogleScholar') {
+            sourceLink.href = cid;
+            sourceLink.target = '_blank';
+            sourceLink.rel = 'noopener noreferrer';
+        }
+        sourceEl.append(sourceLink);
         keyInput.value = citationKey(bib);
         actions.forEach(el => { el.disabled = false; });
         setStatus(status, 'info', 'Edit the key or BibTeX before copying. Add the entry to your .bib file before using its citation.');
@@ -1455,12 +1504,34 @@ function formatVersionMeta(article, source) {
     return String(article.author ?? '').trim();
 }
 
-function buildSingleResultRow(article, source) {
+function bibSourceLabel(source) {
+    return OFFICIAL_BIB_LABELS[source] || (source === 'GoogleScholar' ? 'Google Scholar' : 'DBLP');
+}
+
+function getArticleBibTarget(article, source, preference = 'official') {
+    if (source === 'DBLP' && preference === 'official' && getDblpVersionKind(article) !== 'preprint') {
+        for (const url of article.electronicEditions || []) {
+            const official = getOfficialSource(url);
+            if (official) return official;
+        }
+    }
+    return { source, cid: source === 'DBLP' ? article.url : article.id, origin: article.origin || '' };
+}
+
+function appendBibSource(container, target) {
+    const label = document.createElement('div');
+    label.className = 'obh-result-meta';
+    label.textContent = `BibTeX: ${bibSourceLabel(target.source)}`;
+    container.appendChild(label);
+}
+
+function buildSingleResultRow(article, source, bibPreference = 'official') {
+    const target = getArticleBibTarget(article, source, bibPreference);
     const item = document.createElement("div");
     item.className = "obh-result";
-    item.dataset.source = source;
-    item.dataset.cid = source === "DBLP" ? article.url : article.id;
-    item.dataset.origin = article.origin || '';
+    item.dataset.source = target.source;
+    item.dataset.cid = target.cid;
+    item.dataset.origin = target.origin || '';
 
     const main = document.createElement("div");
     main.className = "obh-result-main";
@@ -1486,22 +1557,24 @@ function buildSingleResultRow(article, source) {
     preview.dataset.obhAction = 'preview';
     preview.textContent = 'Preview';
     actions.append(action, preview);
-    appendSourceLink(actions, article, source);
+    appendSourceLink(actions, article, target);
 
     main.appendChild(titleEl);
     main.appendChild(metaEl);
+    appendBibSource(main, target);
     item.appendChild(main);
     item.appendChild(actions);
     return item;
 }
 
-function buildGroupedResultRow(group) {
+function buildGroupedResultRow(group, bibPreference = 'official') {
+    const target = getArticleBibTarget(group.best, group.source, bibPreference);
     const groupEl = document.createElement("div");
     groupEl.className = "obh-group";
-    groupEl.dataset.bestSource = group.source;
-    groupEl.dataset.bestCid = group.source === 'DBLP' ? (group.best?.url ?? '') : (group.best?.id ?? '');
+    groupEl.dataset.bestSource = target.source;
+    groupEl.dataset.bestCid = target.cid || '';
     groupEl.dataset.versionCount = String(group.versions.length);
-    groupEl.dataset.origin = group.best?.origin || '';
+    groupEl.dataset.origin = target.origin || '';
 
     const header = document.createElement("div");
     header.className = "obh-group-header";
@@ -1519,6 +1592,7 @@ function buildGroupedResultRow(group) {
 
     main.appendChild(titleEl);
     main.appendChild(metaEl);
+    appendBibSource(main, target);
 
     const actions = document.createElement("div");
     actions.className = "obh-group-actions";
@@ -1544,6 +1618,7 @@ function buildGroupedResultRow(group) {
     preview.textContent = 'Preview';
     actions.appendChild(preview);
     actions.appendChild(toggle);
+    appendSourceLink(actions, group.best, target);
 
     header.appendChild(main);
     header.appendChild(actions);
@@ -1552,25 +1627,25 @@ function buildGroupedResultRow(group) {
     const versions = document.createElement("div");
     versions.className = "obh-versions";
     for (const version of group.versions) {
-        versions.appendChild(buildSingleResultRow(version, group.source));
+        versions.appendChild(buildSingleResultRow(version, group.source, bibPreference));
     }
     groupEl.appendChild(versions);
     return groupEl;
 }
 
-function renderSearchResults(contentEl, groups) {
+function renderSearchResults(contentEl, groups, bibPreference = 'official') {
     contentEl.replaceChildren();
     for (const group of groups) {
         if (group.versions.length <= 1) {
-            contentEl.appendChild(buildSingleResultRow(group.versions[0], group.source));
+            contentEl.appendChild(buildSingleResultRow(group.versions[0], group.source, bibPreference));
         } else {
-            contentEl.appendChild(buildGroupedResultRow(group));
+            contentEl.appendChild(buildGroupedResultRow(group, bibPreference));
         }
     }
 }
 
-function appendSourceLink(container, article, source) {
-    const raw = article.url;
+function appendSourceLink(container, article, target) {
+    const raw = Object.hasOwn(OFFICIAL_BIB_LABELS, target.source) ? target.cid : article.url;
     if (!raw) return;
     try {
         const url = new URL(raw);
@@ -1648,7 +1723,7 @@ function getDblpVersionKind(article) {
 const dblpOrigin = "https://dblp.org";
 
 // All providers share bounded requests. Verification stays an explicit UI action.
-function requestText(url, { timeout = 20000, verificationUrl = '', provider = 'Google Scholar' } = {}) {
+function requestText(url, { timeout = 20000, verificationUrl = '', provider = 'Google Scholar', withURL = false, validateURL } = {}) {
     return new Promise((resolve, reject) => {
         const fail = (message, needsVerification = false, status = null) => {
             const error = new Error(message);
@@ -1676,7 +1751,12 @@ function requestText(url, { timeout = 20000, verificationUrl = '', provider = 'G
                         fail('Request failed (HTTP ' + (Number.isFinite(status) ? status : 'unknown') + ').', false, status);
                         return;
                     }
-                    resolve(text);
+                    const finalURL = response.finalUrl || url;
+                    if (validateURL && !validateURL(finalURL)) {
+                        fail(provider + ' redirected to an unexpected page. Open the source page or use DBLP BibTeX.');
+                        return;
+                    }
+                    resolve(withURL ? { text, url: finalURL } : text);
                 },
                 ontimeout: () => fail('Request timed out. Please retry or choose another source.'),
                 onabort: () => fail('Request was cancelled.'),
@@ -1796,7 +1876,8 @@ async function getArticleIDListDBLP(query, resultCount) {
             author: Array.from(info.querySelectorAll('author')).map(author => author.textContent?.trim() ?? '').filter(Boolean).join(', '),
             venue: info.querySelector('venue')?.textContent?.trim() ?? '',
             year: info.querySelector('year')?.textContent?.trim() ?? '',
-            type: info.querySelector('type')?.textContent?.trim() ?? ''
+            type: info.querySelector('type')?.textContent?.trim() ?? '',
+            electronicEditions: Array.from(info.querySelectorAll('ee')).map(ee => ee.textContent?.trim() ?? '').filter(Boolean)
         });
     }
     return articles;
@@ -1818,6 +1899,204 @@ async function getBibTexDBLP(publicationURL) {
     const bibtexURL = getBibTexURLDBLP(publicationURL);
     if (!bibtexURL) throw new Error('Invalid DBLP publication URL.');
     return validateBibTeX(await requestText(bibtexURL, { verificationUrl: bibtexURL, provider: 'DBLP' }));
+}
+
+// DBLP supplies discovery and the publication's electronic-edition links. These
+// adapters read the original official export; they never synthesize a citation.
+function officialURL(raw) {
+    try {
+        const url = new URL(raw);
+        if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port) return null;
+        url.protocol = 'https:';
+        return url;
+    } catch { return null; }
+}
+
+function isNeuripsHost(host) {
+    return ['proceedings.neurips.cc', 'papers.nips.cc', 'proceedings.nips.cc', 'papers.neurips.cc'].includes(host);
+}
+
+function getOfficialSource(rawURL) {
+    const url = officialURL(rawURL);
+    if (!url) return null;
+    if (isNeuripsHost(url.hostname)) {
+        const path = url.pathname.replace(/^\/paper\/(\d{4})\//, '/paper_files/paper/$1/');
+        if (/^\/paper_files\/paper\/\d{4}\/hash\/[a-f\d]{32}-Abstract(?:-[A-Za-z_]+)?\.html$/.test(path) ||
+            /^\/paper\/(?:\d+-[A-Za-z\d_-]+)\/?$/.test(path)) {
+            return { source: 'NeurIPS', cid: 'https://proceedings.neurips.cc' + path };
+        }
+    }
+    if (url.hostname === 'proceedings.mlr.press' && /^\/v\d+\/[a-z\d_-]+\.html$/i.test(url.pathname)) {
+        return { source: 'PMLR', cid: 'https://proceedings.mlr.press' + url.pathname };
+    }
+    let anthologyID = '';
+    if (url.hostname === 'aclanthology.org') {
+        anthologyID = url.pathname.replace(/^\//, '').replace(/\/$|\.(?:bib|pdf)$/, '');
+    } else if (['aclweb.org', 'www.aclweb.org'].includes(url.hostname) && url.pathname.startsWith('/anthology/')) {
+        anthologyID = url.pathname.slice('/anthology/'.length).replace(/\/$|\.(?:bib|pdf)$/, '');
+    } else if (['doi.org', 'dx.doi.org'].includes(url.hostname) && url.pathname.startsWith('/10.18653/v1/')) {
+        anthologyID = url.pathname.slice('/10.18653/v1/'.length);
+    }
+    if (/^(?:[A-Z]\d{2}-\d{4,5}|\d{4}\.[a-z\d-]+\.\d+)$/i.test(anthologyID)) {
+        if (/^[a-z]\d{2}-/i.test(anthologyID)) anthologyID = anthologyID[0].toUpperCase() + anthologyID.slice(1);
+        return { source: 'ACLAnthology', cid: 'https://aclanthology.org/' + anthologyID + '/' };
+    }
+    if (url.hostname === 'openreview.net' && /^\/(?:forum|pdf)\/?$/.test(url.pathname)) {
+        const id = url.searchParams.get('id') || '';
+        if (/^[A-Za-z\d_-]{1,128}$/.test(id)) return { source: 'OpenReview', cid: 'https://openreview.net/forum?id=' + encodeURIComponent(id) };
+    }
+    return null;
+}
+
+function neuripsPaperIdentity(rawURL) {
+    const url = officialURL(rawURL);
+    if (!url || !isNeuripsHost(url.hostname)) return '';
+    return url.pathname.match(/\/paper\/(\d{4})\/(?:hash|file)\/([a-f\d]{32})-/)?.slice(1).join('/') || '';
+}
+
+function isNeuripsBibURL(rawURL) {
+    const url = officialURL(rawURL);
+    return Boolean(url && isNeuripsHost(url.hostname) && (
+        /^\/(?:paper_files\/)?paper\/\d{4}\/file\/[a-f\d]{32}-Bibtex(?:-[A-Za-z_]+)?\.bib$/.test(url.pathname) ||
+        /^\/paper_files\/paper\/\d+-\/bibtex$/.test(url.pathname)
+    ));
+}
+
+function validateOfficialBib(text) {
+    const parsed = parseBibTeXRecords(text);
+    if (parsed.records.length !== 1) throw new Error('The official source did not return exactly one BibTeX entry.');
+    return parsed.bib;
+}
+
+// Read a top-level field without rewriting its TeX or mistaking text inside an
+// abstract for a field. Used only to inspect the official publication status.
+function readBibField(bib, name) {
+    const { records } = parseBibTeXRecords(bib);
+    const record = records[0];
+    let cursor = record.keyEnd + 1;
+    while (cursor < record.end - 1) {
+        if (/[\s,]/.test(bib[cursor])) { cursor++; continue; }
+        if (bib[cursor] === '%') {
+            const next = bib.indexOf('\n', cursor);
+            cursor = next < 0 ? record.end : next + 1;
+            continue;
+        }
+        const field = /^([a-z][a-z\d_-]*)\s*=\s*/i.exec(bib.slice(cursor));
+        if (!field) return '';
+        cursor += field[0].length;
+        const start = cursor;
+        let depth = 0;
+        let quoted = false;
+        let escaped = false;
+        for (; cursor < record.end - 1; cursor++) {
+            const char = bib[cursor];
+            if (escaped) { escaped = false; continue; }
+            if (char === '\\') { escaped = true; continue; }
+            if (char === '{') depth++;
+            if (char === '}') depth--;
+            if (char === '"' && depth === 0) quoted = !quoted;
+            if (char === ',' && depth === 0 && !quoted) break;
+        }
+        if (field[1].toLowerCase() === name.toLowerCase()) {
+            return bib.slice(start, cursor).trim().replace(/^[{"]|[}"]$/g, '');
+        }
+    }
+    return '';
+}
+
+async function getBibTexOfficial(source, cid) {
+    const target = getOfficialSource(cid);
+    if (!target || target.source !== source) throw new Error('Invalid official publication URL.');
+    const provider = bibSourceLabel(source);
+    const requestOptions = { provider, verificationUrl: target.cid };
+    if (source === 'OpenReview') return getBibTexOpenReview(target.cid);
+    if (source === 'ACLAnthology') {
+        const exportURL = target.cid.replace(/\/$/, '.bib');
+        return validateOfficialBib(await requestText(exportURL, {
+            ...requestOptions,
+            validateURL: final => officialURL(final)?.href === exportURL,
+        }));
+    }
+
+    const page = await requestText(target.cid, {
+        ...requestOptions, withURL: true,
+        validateURL: final => {
+            const resolved = getOfficialSource(final);
+            if (!resolved || resolved.source !== source) return false;
+            if (source !== 'NeurIPS') return resolved.cid === target.cid;
+            const expected = neuripsPaperIdentity(target.cid);
+            return !expected || neuripsPaperIdentity(resolved.cid) === expected;
+        },
+    });
+    const doc = new DOMParser().parseFromString(page.text, 'text/html');
+    if (source === 'PMLR') {
+        const bib = doc.querySelector('code#bibtex')?.textContent;
+        if (!bib) throw new Error('PMLR did not provide a BibTeX export on this paper page.');
+        return validateOfficialBib(bib);
+    }
+
+    const link = Array.from(doc.querySelectorAll('a[href]')).find(a => /^bibtex$/i.test(a.textContent.trim()));
+    if (!link) throw new Error('NeurIPS did not provide a BibTeX link on this paper page.');
+    const exportURL = new URL(link.getAttribute('href'), page.url).href;
+    if (!isNeuripsBibURL(exportURL)) throw new Error('NeurIPS returned an unexpected BibTeX link.');
+    const expected = neuripsPaperIdentity(page.url);
+    const validateExport = final => {
+        if (!isNeuripsBibURL(final)) return false;
+        const actual = neuripsPaperIdentity(final);
+        return actual ? actual === expected : final === exportURL;
+    };
+    if (!validateExport(exportURL)) throw new Error('NeurIPS linked to a different paper’s BibTeX.');
+    return validateOfficialBib(await requestText(exportURL, { ...requestOptions, validateURL: validateExport }));
+}
+
+async function getBibTexOpenReview(forumURL) {
+    const id = new URL(forumURL).searchParams.get('id');
+    let note = null;
+    for (const origin of ['https://api2.openreview.net', 'https://api.openreview.net']) {
+        const apiURL = origin + '/notes?id=' + encodeURIComponent(id);
+        let text;
+        try {
+            text = await requestText(apiURL, {
+                provider: 'OpenReview', verificationUrl: forumURL,
+                validateURL: final => officialURL(final)?.href === apiURL,
+            });
+        } catch (error) {
+            // A v1 record can be absent in v2. Do not retry rate limits or verification errors.
+            if (error.httpStatus === 404 && origin === 'https://api2.openreview.net') continue;
+            throw error;
+        }
+        let data;
+        try { data = JSON.parse(text); } catch { throw new Error('OpenReview returned an invalid note response.'); }
+        if (!Array.isArray(data.notes)) throw new Error('OpenReview returned an invalid note response.');
+        if (!data.notes.length) continue;
+        note = data.notes.find(entry => entry.id === id);
+        if (!note) throw new Error('OpenReview returned a different paper.');
+        break;
+    }
+    if (!note) throw new Error('This paper was not found in OpenReview.');
+    if (note.forum && note.forum !== id) throw new Error('OpenReview returned a discussion note instead of the paper.');
+    const field = name => {
+        const value = note.content?.[name];
+        return typeof value === 'string' ? value : typeof value?.value === 'string' ? value.value : '';
+    };
+    const raw = field('_bibtex');
+    if (!raw) throw new Error('OpenReview has no official BibTeX export for this paper.');
+    const bib = validateOfficialBib(raw);
+    // Legacy venueid alone also appeared on rejected notes. Check the actual
+    // official citation and explicit status instead of treating every forum as accepted.
+    const negative = /submitted|submission|under[\s_/-]*review|rejected|withdrawn|withdrawal|desk[\s_-]*reject/i;
+    const booktitle = readBibField(bib, 'booktitle');
+    const status = readBibField(bib, 'note');
+    if (negative.test(field('venue') + ' ' + field('venueid')) ||
+        negative.test((booktitle + ' ' + status).replace(/[{}]/g, '')) ||
+        parseBibTeXRecords(bib).records[0].type !== 'inproceedings' || !booktitle.trim()) {
+        throw new Error('OpenReview does not identify this citation as a published conference version.');
+    }
+    const citationURL = getOfficialSource(readBibField(bib, 'url').replace(/[{}]/g, '').replace(/\\&/g, '&'));
+    if (citationURL?.source === 'OpenReview' && citationURL.cid !== forumURL) {
+        throw new Error('OpenReview’s BibTeX points to a different paper.');
+    }
+    return bib;
 }
 
 // Google Scholar Functions

@@ -8,7 +8,7 @@
     <img alt="从Greasy Fork安装" src="https://img.shields.io/badge/Install-Greasy_Fork-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/releases">
-    <img alt="版本" src="https://img.shields.io/badge/Version-2.0.2-blue" />
+    <img alt="版本" src="https://img.shields.io/badge/Version-2.1.0-blue" />
   </a>
   <a href="LICENSE">
     <img alt="许可证" src="https://img.shields.io/badge/License-MIT-blue" />
@@ -49,6 +49,7 @@
 编写LaTeX文档通常需要包含大量的学术参考文献。手动搜索和格式化BibTeX条目可能非常耗时。Overleaf-Bib-Helper通过将DBLP和Google Scholar的搜索功能集成到Overleaf界面中，简化了这一过程，使用户能够快速找到并复制BibTeX条目，省时省力。
 
 ## 功能
+- 从 NeurIPS proceedings、PMLR（含 ICML）、ACL Anthology 和 OpenReview 读取官网原始 BibTeX，显示引用出处，并提供显式 DBLP fallback。
 - 适配新版和旧版 Overleaf toolbar；切换文件或布局后自动恢复 `Bib` 按钮。
 - `Alt+Shift+B` 或 Tampermonkey menu 随时打开，可将选中的论文标题带入搜索框。
 - BibTeX 预览与编辑、citation key 修改、一键复制 key 或 `\cite{key}`、下载 `.bib` 文件。
@@ -106,9 +107,10 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 
 ### 搜索文章
 1. **输入查询**：在输入字段中键入搜索词（例如文章标题、作者或关键词）。
-2. **选择来源**：从“来源”下拉菜单中选择“DBLP”或“Google Scholar”。
+2. **选择 Search**：从“Search”下拉菜单中选择“DBLP”或“Google Scholar”。
    - **DBLP**：最适合计算机科学文献，提供结构化数据。
    - **Google Scholar**：覆盖更广泛的领域，但可能需要验证码验证。
+   - 使用 DBLP 时，**BibTeX → Official venue when available** 会从已支持的官方论文链接获取原始引用；选择 **DBLP** 则使用 DBLP 的导出。
 3. **设置结果数量**：从“结果”下拉菜单中选择5、10、20或50个结果。
 4. **开始搜索**：
    - 按下**Enter**键或点击放大镜图标。
@@ -120,6 +122,7 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 2. Preview 中可修改 citation key，复制 BibTeX、key、`\cite{key}`，或下载 `.bib` 文件。
 3. 先把条目加入项目的 `.bib` 文件，再将 citation command 粘贴到 LaTeX 文档。脚本不会自动修改项目文件。
 4. 预览中的复制和下载会验证 BibTeX；网络错误或验证码页面不会覆盖剪贴板。
+5. 结果与 preview 会标明 BibTeX 来源，保留官网原始 citation key 和字段。官网读取失败时可点击 **Use DBLP BibTeX** 切换偏好并重新搜索；不会静默替换或自动复制另一来源的引用。
 
 <div align="center">
 <img src="figure/ui-v2.png" width="600" alt="Bib Helper search and editable BibTeX preview" />
@@ -129,13 +132,24 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 - 按下**Esc**键或再次点击工具栏图标。
 
 ## 支持的来源
-- **DBLP**：一个全面的计算机科学书目数据库，提供可靠的BibTeX条目。
+- **DBLP**：跨会议检索论文并提供正式出版链接。搜索范围仍受 DBLP 收录情况限制，不是直接对各会议官网做全文搜索。
 - **Google Scholar**：一个更广泛的学术搜索引擎，可能包括更多最新或跨学科的作品，但可能需要用户验证（例如验证码）。
+
+对 DBLP 结果，默认 BibTeX 偏好可读取以下官网导出：
+
+| 官网来源 | 覆盖示例 | 获取方式 |
+| --- | --- | --- |
+| [NeurIPS proceedings](https://proceedings.neurips.cc/) | NeurIPS / NIPS | 读取论文页实际提供的 Bibtex 链接，兼容旧年份与新版 tracks |
+| [PMLR](https://proceedings.mlr.press/) | ICML、AISTATS 及其他 PMLR volumes | 读取论文页内的原始 BibTeX |
+| [ACL Anthology](https://aclanthology.org/info/ids/) | ACL、EMNLP、NAACL、Findings | 官方 `.bib` 文件，兼容旧版 ID |
+| [OpenReview](https://github.com/openreview/openreview-web/blob/master/components/forum/ForumNote.js) | ICLR 等已收录的会议论文 | 读取官方 API 提供的 `_bibtex`，不自行生成替代引用 |
+
+不支持的出版链接和 preprint 继续使用 DBLP，并明确标注。OpenReview 可能要求浏览器验证，部分 note 也没有官方导出；submitted、rejected、withdrawn 引用不会被当成正式会议版本。NeurIPS、PMLR 和 ACL 已核对官网实际响应；OpenReview 的成功响应格式通过 schema regression tests 验证，当前 live API 请求受到验证限制。
 
 ## 故障排除
 - **脚本不起作用？**
   - 确保 Tampermonkey 已获允许运行 userscripts；Chrome 可开启 **Allow User Scripts** 或 **开发者模式**。
-  - 若 Bib 按钮没有显示，尝试 **Alt+Shift+B** 或 Tampermonkey menu，并确认已更新到 v2.0.2。
+  - 若 Bib 按钮没有显示，尝试 **Alt+Shift+B** 或 Tampermonkey menu，并确认已更新到 v2.1.0。
   - 确保Tampermonkey已启用且脚本处于活动状态。
   - 确认您在Overleaf项目页面上。
   - 重新加载或从Greasy Fork重新安装。
@@ -152,6 +166,7 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 虽然Overleaf-Bib-Helper旨在提供无缝体验，但请注意，它依赖于外部服务（DBLP和Google Scholar），这些服务的API可能会更改或需要用户验证（例如验证码）。请自行决定使用此工具，并始终在将检索到的BibTeX条目纳入文档前进行验证。
 
 ## 更新日志
+- **2026-09-07 (v2.1.0)**：新增 NeurIPS、PMLR、ACL Anthology、OpenReview 官网原始 BibTeX；分离检索与引用来源偏好，显示引用出处，支持显式切回 DBLP；保留官网字段并验证 URL 与发表状态。新增官方来源及请求过期 regression tests。
 - **2026-09-07 (v2.0.2)**：toolbar 入口改为无边框的 **Bib** 纯文字按钮，保留键盘操作时的焦点提示。
 - **2026-09-07 (v2.0.1)**：适配新版 toolbar，支持布局切换后恢复入口；移除外部运行依赖；新增快捷键、menu、选中文字搜索、最近查询、BibTeX preview/edit/key/citation/download；增加 timeout、HTTP 与 BibTeX 验证、过期搜索保护、Scholar origin 固定和显式验证入口；修复多语言分组与 Hide preprints 筛选。新增 Playwright regression tests 和 GitHub Actions。
 - **2026-02-03**：代码清理与重构，使用 MutationObserver 进行注入（减少轮询），并放宽 `@connect` 以支持自定义 Scholar 镜像（v1.8）。
