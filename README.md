@@ -12,7 +12,7 @@
     <img alt="Install from Greasy Fork" src="https://img.shields.io/badge/Install-Greasy_Fork-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/releases">
-    <img alt="Version" src="https://img.shields.io/badge/Version-2.0.1-blue" />
+    <img alt="Version" src="https://img.shields.io/badge/Version-2.0.2-blue" />
   </a>
   <a href="LICENSE">
     <img alt="License" src="https://img.shields.io/badge/License-MIT-blue" />
@@ -140,7 +140,7 @@ You can install the script in one of two ways:
 ## Troubleshooting
 - **Script Not Working?**
   - Allow Tampermonkey to run userscripts using **Allow User Scripts** or extension **Developer Mode**.
-  - If the icon is missing, try **Alt+Shift+B** or the Tampermonkey menu and verify that you have v2.0.1 installed.
+  - If the Bib button is missing, try **Alt+Shift+B** or the Tampermonkey menu and verify that you have v2.0.2 installed.
   - Ensure Tampermonkey is enabled and the script is active.
   - Verify you’re on an Overleaf project page.
   - Reload or reinstall from Greasy Fork.
@@ -157,6 +157,7 @@ You can install the script in one of two ways:
 While Overleaf-Bib-Helper aims to provide a seamless experience, please note that it relies on external services (DBLP and Google Scholar) which may change their APIs or require user verification (e.g., CAPTCHA). Use this tool at your own discretion and always verify retrieved BibTeX entries before including them in your documents.
 
 ## Changelog
+- **2026-09-07 (v2.0.2)**: Simplified the toolbar launcher to borderless **Bib** text, preserving keyboard focus visibility.
 - **2026-09-07 (v2.0.1)**: Current toolbar compatibility and layout recovery; dependency-free startup; shortcut/menu/selection search; recent queries; BibTeX preview/edit/key/citation/download; request timeouts, HTTP/BibTeX validation, stale-search protection, pinned Scholar origins and explicit verification actions; Unicode grouping and strict Hide preprints. Added Playwright regression coverage and GitHub Actions.
 - **2026-02-03**: Code cleanup, MutationObserver-based injection, expanded `@connect` for custom Scholar mirrors (v1.8).
 - **2026-02-03**: Overleaf-themed UI, Google Scholar as default, grouped “Versions (n)” results, mirror selector + pagination, plus ordering & year-range filters and DBLP version preference (v1.7).

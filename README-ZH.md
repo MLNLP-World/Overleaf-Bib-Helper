@@ -8,7 +8,7 @@
     <img alt="从Greasy Fork安装" src="https://img.shields.io/badge/Install-Greasy_Fork-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/releases">
-    <img alt="版本" src="https://img.shields.io/badge/Version-2.0.1-blue" />
+    <img alt="版本" src="https://img.shields.io/badge/Version-2.0.2-blue" />
   </a>
   <a href="LICENSE">
     <img alt="许可证" src="https://img.shields.io/badge/License-MIT-blue" />
@@ -135,7 +135,7 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 ## 故障排除
 - **脚本不起作用？**
   - 确保 Tampermonkey 已获允许运行 userscripts；Chrome 可开启 **Allow User Scripts** 或 **开发者模式**。
-  - 若图标没有显示，尝试 **Alt+Shift+B** 或 Tampermonkey menu，并确认已更新到 v2.0.1。
+  - 若 Bib 按钮没有显示，尝试 **Alt+Shift+B** 或 Tampermonkey menu，并确认已更新到 v2.0.2。
   - 确保Tampermonkey已启用且脚本处于活动状态。
   - 确认您在Overleaf项目页面上。
   - 重新加载或从Greasy Fork重新安装。
@@ -152,6 +152,7 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 虽然Overleaf-Bib-Helper旨在提供无缝体验，但请注意，它依赖于外部服务（DBLP和Google Scholar），这些服务的API可能会更改或需要用户验证（例如验证码）。请自行决定使用此工具，并始终在将检索到的BibTeX条目纳入文档前进行验证。
 
 ## 更新日志
+- **2026-09-07 (v2.0.2)**：toolbar 入口改为无边框的 **Bib** 纯文字按钮，保留键盘操作时的焦点提示。
 - **2026-09-07 (v2.0.1)**：适配新版 toolbar，支持布局切换后恢复入口；移除外部运行依赖；新增快捷键、menu、选中文字搜索、最近查询、BibTeX preview/edit/key/citation/download；增加 timeout、HTTP 与 BibTeX 验证、过期搜索保护、Scholar origin 固定和显式验证入口；修复多语言分组与 Hide preprints 筛选。新增 Playwright regression tests 和 GitHub Actions。
 - **2026-02-03**：代码清理与重构，使用 MutationObserver 进行注入（减少轮询），并放宽 `@connect` 以支持自定义 Scholar 镜像（v1.8）。
 - **2026-02-03**：Overleaf 主题配色的全新 UI、默认使用 Google Scholar、同标题结果合并为 “Versions (n)” 版本选择、增加镜像选择并支持结果分页（超过 10 条可继续获取），并提供排序/年份范围过滤与 DBLP 版本偏好（优先正式发表版本，过滤/降权 arXiv/CoRR）（v1.7）。

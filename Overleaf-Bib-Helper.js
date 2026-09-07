@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Overleaf-Bib-Helper
 // @namespace    com.Xunjian.overleaf
-// @version      2.0.1
+// @version      2.0.2
 // @description  Enhances Overleaf by allowing article searches and BibTeX retrieval from DBLP and Google Scholar
 // @author       Xunjian Yin
 // @match        https://www.overleaf.com/project/*
@@ -150,20 +150,20 @@ function injectObhStyles() {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 4px;
             flex: 0 0 auto;
             height: 28px;
-            min-width: 48px;
+            width: auto;
+            min-width: 32px;
             margin: 0 4px;
             padding: 0 6px;
-            border: 1px solid currentColor;
+            border: 0;
             border-radius: 4px;
             background: transparent;
+            box-shadow: none;
             color: inherit;
             font: 12px/1.2 system-ui, sans-serif;
             cursor: pointer;
         }
-        .obh-toggle svg { fill: currentColor; }
         .obh-toggle.obh-active { color: var(--obh-brand, rgb(${FALLBACK_BRAND_RGB.r}, ${FALLBACK_BRAND_RGB.g}, ${FALLBACK_BRAND_RGB.b})); }
 
         .obh-popup {
@@ -914,9 +914,7 @@ function createToggleIcon() {
     iconBox.setAttribute('aria-controls', 'obh-popup');
     iconBox.setAttribute('aria-expanded', String(showBox));
     iconBox.setAttribute('aria-haspopup', 'dialog');
-    iconBox.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>';
-    iconBox.querySelector('svg').setAttribute('aria-hidden', 'true');
-    iconBox.append(document.createTextNode('Bib'));
+    iconBox.textContent = 'Bib';
     return iconBox;
 }
 

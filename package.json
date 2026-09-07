@@ -1,6 +1,6 @@
 {
   "name": "overleaf-bib-helper",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "description": "Browser regression checks for the Overleaf Bib Helper userscript",
   "scripts": {
