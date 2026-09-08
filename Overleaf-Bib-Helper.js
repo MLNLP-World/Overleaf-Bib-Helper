@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Overleaf-Bib-Helper
 // @namespace    com.Xunjian.overleaf
-// @version      2.1.0
+// @version      2.2.1
 // @description  Search papers in Overleaf and retrieve original BibTeX from conference websites, DBLP, or Google Scholar
 // @author       Xunjian Yin
 // @match        https://www.overleaf.com/project/*
 // @match        https://overleaf.com/project/*
 // @match        https://cn.overleaf.com/project*
 // @match        https://latex.pku.edu.cn/project/*
+// @match        https://dl.acm.org/doi/*
 // @icon         https://www.overleaf.com/favicon.ico
 // @run-at       document-idle
 // @noframes
@@ -18,6 +19,9 @@
 // @grant        GM_getValue
 // @grant        GM_openInTab
 // @grant        GM_registerMenuCommand
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
+// @grant        GM_deleteValue
 // @homepageURL  https://github.com/MLNLP-World/Overleaf-Bib-Helper
 // @supportURL   https://github.com/MLNLP-World/Overleaf-Bib-Helper/issues
 // @downloadURL  https://update.greasyfork.org/scripts/532304/Overleaf-Bib-Helper.user.js
@@ -41,6 +45,19 @@ const OFFICIAL_BIB_LABELS = Object.freeze({
     PMLR: 'PMLR',
     ACLAnthology: 'ACL Anthology',
     OpenReview: 'OpenReview',
+    CVF: 'CVF Open Access',
+    BMVC: 'BMVC / BMVA proceedings',
+    ECVA: 'ECVA / Springer',
+    Springer: 'Springer Nature',
+    AAAI: 'AAAI proceedings',
+    IJCAI: 'IJCAI proceedings',
+    KR: 'KR proceedings',
+    IEEE: 'IEEE Xplore',
+    ACM: 'ACM Digital Library',
+});
+const AAAI_JOURNALS = Object.freeze({
+    aaai: 'AAAI', aaaiss: 'AAAI-SS', aiide: 'AIIDE', aies: 'AIES',
+    hcomp: 'HCOMP', iaseai: 'IASEAI', icaps: 'ICAPS', icwsm: 'ICWSM', socs: 'SOCS',
 });
 
 // Overleaf's hosted redesign and older/self-hosted editor layouts coexist.
@@ -606,6 +623,10 @@ function setCurrentScholarOrigin(origin) {
 
 (function () {
     'use strict';
+    if (location.hostname === 'dl.acm.org') {
+        runACMCitationBridge();
+        return;
+    }
     initBrandTheme();
     injectObhStyles();
     registerGlobalShortcuts();
@@ -1510,10 +1531,12 @@ function bibSourceLabel(source) {
 
 function getArticleBibTarget(article, source, preference = 'official') {
     if (source === 'DBLP' && preference === 'official' && getDblpVersionKind(article) !== 'preprint') {
-        for (const url of article.electronicEditions || []) {
-            const official = getOfficialSource(url);
-            if (official) return official;
-        }
+        // Prefer the conference's open proceedings to a publisher DOI when the
+        // same DBLP record supplies both (e.g. CVF and IEEE for a CVPR paper).
+        const priority = ['CVF', 'BMVC', 'NeurIPS', 'PMLR', 'ACLAnthology', 'AAAI', 'IJCAI', 'KR', 'ECVA', 'Springer', 'OpenReview', 'ACM', 'IEEE'];
+        const targets = (article.electronicEditions || []).map(getOfficialSource).filter(Boolean);
+        targets.sort((a, b) => priority.indexOf(a.source) - priority.indexOf(b.source));
+        if (targets.length) return targets[0];
     }
     return { source, cid: source === 'DBLP' ? article.url : article.id, origin: article.origin || '' };
 }
@@ -1550,12 +1573,12 @@ function buildSingleResultRow(article, source, bibPreference = 'official') {
     action.type = 'button';
     action.dataset.obhAction = 'copy';
     action.className = "obh-result-action";
-    action.textContent = "Copy";
+    action.textContent = target.source === 'ACM' ? 'Open ACM & copy' : 'Copy';
     const preview = document.createElement('button');
     preview.type = 'button';
     preview.className = 'obh-result-action';
     preview.dataset.obhAction = 'preview';
-    preview.textContent = 'Preview';
+    preview.textContent = target.source === 'ACM' ? 'Open ACM preview' : 'Preview';
     actions.append(action, preview);
     appendSourceLink(actions, article, target);
 
@@ -1600,7 +1623,7 @@ function buildGroupedResultRow(group, bibPreference = 'official') {
     const copyBest = document.createElement("button");
     copyBest.type = 'button';
     copyBest.className = "obh-result-action";
-    copyBest.textContent = "Copy best";
+    copyBest.textContent = target.source === 'ACM' ? 'Open ACM & copy' : 'Copy best';
     copyBest.setAttribute("data-obh-action", "copy-best");
 
     const toggle = document.createElement("button");
@@ -1615,7 +1638,7 @@ function buildGroupedResultRow(group, bibPreference = 'official') {
     preview.type = 'button';
     preview.className = 'obh-result-action';
     preview.dataset.obhAction = 'preview';
-    preview.textContent = 'Preview';
+    preview.textContent = target.source === 'ACM' ? 'Open ACM preview' : 'Preview';
     actions.appendChild(preview);
     actions.appendChild(toggle);
     appendSourceLink(actions, group.best, target);
@@ -1723,7 +1746,7 @@ function getDblpVersionKind(article) {
 const dblpOrigin = "https://dblp.org";
 
 // All providers share bounded requests. Verification stays an explicit UI action.
-function requestText(url, { timeout = 20000, verificationUrl = '', provider = 'Google Scholar', withURL = false, validateURL } = {}) {
+function requestText(url, { timeout = 20000, verificationUrl = '', provider = 'Google Scholar', withURL = false, validateURL, method = 'GET', headers, data } = {}) {
     return new Promise((resolve, reject) => {
         const fail = (message, needsVerification = false, status = null) => {
             const error = new Error(message);
@@ -1735,13 +1758,15 @@ function requestText(url, { timeout = 20000, verificationUrl = '', provider = 'G
         try {
             GM_xmlhttpRequest({
                 url,
-                method: 'GET',
+                method,
+                ...(headers ? { headers } : {}),
+                ...(data != null ? { data } : {}),
                 timeout,
                 onload: response => {
                     const status = Number(response.status);
                     const text = String(response.responseText ?? '');
                     const needsVerification = Boolean(verificationUrl) &&
-                        (status === 403 || status === 429 || isLikelyScholarVerificationPage(text) ||
+                        (status === 403 || status === 418 || status === 429 || isLikelyScholarVerificationPage(text) ||
                             /id=["']anubis_challenge|id=["']challenge-form|cf-chl-/i.test(text));
                     if (needsVerification) {
                         fail(provider + ' requires verification or is limiting requests. Open the verification page, then retry.', true, status);
@@ -1916,9 +1941,84 @@ function isNeuripsHost(host) {
     return ['proceedings.neurips.cc', 'papers.nips.cc', 'proceedings.nips.cc', 'papers.neurips.cc'].includes(host);
 }
 
+function normalizeDOI(value) {
+    let raw = String(value ?? '').trim().replace(/[{}]/g, '').replace(/\\_/g, '_');
+    const url = officialURL(raw);
+    if (url) {
+        if (!['doi.org', 'dx.doi.org'].includes(url.hostname)) return '';
+        try { raw = decodeURIComponent(url.pathname.slice(1)); } catch { return ''; }
+    }
+    if (!/^10\.\d{4,9}\/[A-Za-z\d._;()/:+-]+$/.test(raw) || raw.split('/').some(part => part === '.' || part === '..')) return '';
+    return raw;
+}
+
+function sourceFromDOI(doi) {
+    if (/^10\.(?:1145|5555)\//i.test(doi)) return { source: 'ACM', cid: 'https://dl.acm.org/doi/' + doi };
+    if (/^10\.1007\//i.test(doi)) return { source: 'Springer', cid: 'https://link.springer.com/chapter/' + doi };
+    if (/^10\.1109\//i.test(doi)) return { source: 'IEEE', cid: 'https://doi.org/' + doi };
+    const ijcai = /^10\.24963\/(ijcai|kr)\.(20\d{2})\/(\d+)$/i.exec(doi);
+    if (ijcai && Number(ijcai[3]) > 0) {
+        const [, venue, year, number] = ijcai;
+        if (venue.toLowerCase() === 'kr') return { source: 'KR', cid: `https://proceedings.kr.org/${year}/${Number(number)}/` };
+        if (Number(year) >= 2017) return { source: 'IJCAI', cid: `https://www.ijcai.org/proceedings/${year}/${Number(number)}` };
+    }
+    const aaai = /^10\.1609\/([a-z]+)\.v\d+i\d+\.(\d+)$/i.exec(doi);
+    if (aaai && Object.hasOwn(AAAI_JOURNALS, aaai[1].toLowerCase())) {
+        return { source: 'AAAI', cid: `https://ojs.aaai.org/index.php/${AAAI_JOURNALS[aaai[1].toLowerCase()]}/article/view/${Number(aaai[2])}` };
+    }
+    if (/^10\.18653\/v1\//i.test(doi)) return getOfficialSource('https://aclanthology.org/' + doi.split('/').slice(2).join('/') + '/');
+    return null;
+}
+
+function ieeeArticleID(url) {
+    if (url?.hostname !== 'ieeexplore.ieee.org') return '';
+    const pathID = /^\/(?:abstract\/)?document\/(\d+)\/?$/.exec(url.pathname)?.[1];
+    const queryID = /^\/(?:xpl|xpls|stamp)\//.test(url.pathname) ? url.searchParams.get('arnumber') : '';
+    return /^\d+$/.test(pathID || queryID || '') ? pathID || queryID : '';
+}
+
 function getOfficialSource(rawURL) {
+    const bmvc = getBMVCSource(rawURL);
+    if (bmvc) return bmvc;
+    const doi = normalizeDOI(rawURL);
+    if (doi) return sourceFromDOI(doi);
     const url = officialURL(rawURL);
     if (!url) return null;
+    if (url.hostname === 'dl.acm.org') {
+        const acmDOI = normalizeDOI(url.pathname.replace(/^\/doi\/(?:abs\/|full\/|pdf\/|epdf\/)?/, ''));
+        if (/^10\.(?:1145|5555)\//i.test(acmDOI)) return sourceFromDOI(acmDOI);
+    }
+    if (['openaccess.thecvf.com', 'www.openaccess.thecvf.com'].includes(url.hostname)) {
+        const path = url.pathname.replace('/papers/', '/html/').replace(/_paper\.pdf$/, '_paper.html');
+        if (/^\/(?:content\/[^/]+(?:\/[^/]+)?|content_[A-Za-z\d_]+)\/html\/(?:w\d+\/)?[^/]+_paper\.html$/.test(path)) {
+            return { source: 'CVF', cid: 'https://openaccess.thecvf.com' + path };
+        }
+    }
+    if (['ecva.net', 'www.ecva.net'].includes(url.hostname) && /^\/papers\/eccv_\d{4}\/papers_ECCV\/html\/[^/]+_paper\.php$/.test(url.pathname)) {
+        return { source: 'ECVA', cid: 'https://www.ecva.net' + url.pathname };
+    }
+    if (['link.springer.com', 'link.springernature.com'].includes(url.hostname)) {
+        const springerDOI = normalizeDOI(url.pathname.replace(/^\/(?:chapter\/|article\/|book\/)?/, ''));
+        if (/^10\.1007\//i.test(springerDOI)) return sourceFromDOI(springerDOI);
+    }
+    if (['ijcai.org', 'www.ijcai.org'].includes(url.hostname)) {
+        const match = /^\/proceedings\/(20\d{2})\/(?:bibtex\/)?(\d+)(?:\.pdf)?\/?$/.exec(url.pathname);
+        if (match) return sourceFromDOI(`10.24963/ijcai.${match[1]}/${match[2]}`);
+    }
+    if (url.hostname === 'proceedings.kr.org') {
+        const match = /^\/(20\d{2})\/(\d+)(?:\/bibtex)?\/?$/.exec(url.pathname) || /^\/(20\d{2})\/bibtex\/(\d+)\/?$/.exec(url.pathname);
+        if (match) return sourceFromDOI(`10.24963/kr.${match[1]}/${match[2]}`);
+    }
+    if (url.hostname === 'ojs.aaai.org') {
+        const match = /^\/index\.php\/([A-Za-z\d-]+)\/article\/(?:view|download)\/(\d+)(?:\/\d+)*\/?$/.exec(url.pathname);
+        if (match) return { source: 'AAAI', cid: `https://ojs.aaai.org/index.php/${match[1]}/article/view/${Number(match[2])}` };
+    }
+    if (['aaai.org', 'www.aaai.org'].includes(url.hostname) && (
+        /^\/ocs\/index\.php\/[^/]+\/[^/]+\/paper\/view\/\d+\/?$/.test(url.pathname) ||
+        /^\/papers\/[^/]+\/?$/.test(url.pathname)
+    )) return { source: 'AAAI', cid: 'https://aaai.org' + url.pathname };
+    const ieeeID = ieeeArticleID(url);
+    if (ieeeID) return { source: 'IEEE', cid: `https://ieeexplore.ieee.org/document/${ieeeID}/` };
     if (isNeuripsHost(url.hostname)) {
         const path = url.pathname.replace(/^\/paper\/(\d{4})\//, '/paper_files/paper/$1/');
         if (/^\/paper_files\/paper\/\d{4}\/hash\/[a-f\d]{32}-Abstract(?:-[A-Za-z_]+)?\.html$/.test(path) ||
@@ -2004,11 +2104,341 @@ function readBibField(bib, name) {
     return '';
 }
 
+function validatePublisherBib(text, { doi = '', doiKey = false, requireAuthor = false } = {}) {
+    const bib = validateOfficialBib(text);
+    const present = field => readBibField(bib, field).replace(/[{}\s]/g, '');
+    if (!present('title') || !(present('author') || !requireAuthor && present('editor'))) {
+        throw new Error('The official export is missing its title or authors.');
+    }
+    if (doi) {
+        const rawDOI = readBibField(bib, 'doi').trim();
+        const explicit = normalizeDOI(rawDOI);
+        if (rawDOI && !explicit) throw new Error('The official export contains an invalid DOI.');
+        const key = doiKey ? normalizeDOI(parseBibTeXRecords(bib).records[0].key) : '';
+        const actual = explicit || key;
+        if (!actual || actual.toLowerCase() !== doi.toLowerCase()) {
+            throw new Error('The official BibTeX DOI does not match this paper.');
+        }
+    }
+    return bib;
+}
+
+function parseOfficialHTML(text) {
+    return new DOMParser().parseFromString(text, 'text/html');
+}
+
+function singleBibBlock(doc, selector) {
+    const blocks = Array.from(doc.querySelectorAll(selector));
+    if (blocks.length !== 1) throw new Error('The official page did not provide exactly one BibTeX export.');
+    return blocks[0].value ?? blocks[0].textContent;
+}
+
+async function fetchOfficialPage(target) {
+    return requestText(target.cid, {
+        provider: bibSourceLabel(target.source), verificationUrl: target.cid, withURL: true,
+        validateURL: final => getOfficialSource(final)?.cid === target.cid,
+    });
+}
+
+async function getBibTexSpringer(cid) {
+    const doi = normalizeDOI(new URL(cid).pathname.slice('/chapter/'.length));
+    const exportURL = 'https://citation-needed.springer.com/v2/references/' + doi + '?format=bibtex&flavour=citation';
+    const bib = await requestText(exportURL, {
+        provider: 'Springer Nature', verificationUrl: cid,
+        validateURL: final => {
+            const url = officialURL(final);
+            return url?.hostname === 'citation-needed.springer.com' &&
+                normalizeDOI(url.pathname.slice('/v2/references/'.length)).toLowerCase() === doi.toLowerCase() &&
+                url.pathname.startsWith('/v2/references/') && url.searchParams.get('format') === 'bibtex';
+        },
+    });
+    // Springer uses the DOI as the official citation key and may omit a DOI field.
+    return validatePublisherBib(bib, { doi, doiKey: true });
+}
+
+function getBMVCSource(rawURL) {
+    const archivedPaper = (year, number) => ({
+        source: 'BMVC',
+        cid: `https://www.bmva-archive.org.uk/bmvc/${year}/papers/paper${String(Number(number)).padStart(3, '0')}/index.html`,
+    });
+    const modernPaper = (year, number) => {
+        const base = {
+            2023: 'https://proceedings.bmvc2023.org/',
+            2024: 'https://bmvc2024.org/proceedings/',
+            2025: 'https://bmvc2025.bmva.org/proceedings/',
+        }[year];
+        return { source: 'BMVC', cid: base + Number(number) + '/' };
+    };
+    // Only these archived main proceedings have verified single-record exports.
+    const doi = /^10\.5244\/C\.(29|30|31)\.(\d{1,3})$/i.exec(normalizeDOI(rawURL));
+    if (doi && Number(doi[2]) > 0) return archivedPaper(Number(doi[1]) + 1986, doi[2]);
+    const url = officialURL(rawURL);
+    if (!url) return null;
+    const modernSources = {
+        'proceedings.bmvc2023.org': { year: 2023, path: /^\/(\d{1,6})\/?$/ },
+        'bmvc2024.org': { year: 2024, path: /^\/proceedings\/(\d{1,6})\/?$/ },
+        'bmvc2025.bmva.org': { year: 2025, path: /^\/proceedings\/(\d{1,6})\/?$/ },
+    };
+    const modern = Object.hasOwn(modernSources, url.hostname) ? modernSources[url.hostname] : null;
+    const number = modern?.path.exec(url.pathname)?.[1];
+    if (number && Number(number) > 0) return modernPaper(modern.year, number);
+    const pdfYear = url.hostname === 'papers.bmvc2023.org' ? 2023 : url.hostname === 'papers.bmvc2024.org' ? 2024 : 0;
+    const pdf = /^\/(\d{1,6})\.pdf$/.exec(url.pathname);
+    if (pdfYear && pdf && Number(pdf[1]) > 0) return modernPaper(pdfYear, pdf[1]);
+    const archiveHost = ['bmva-archive.org.uk', 'www.bmva-archive.org.uk'].includes(url.hostname);
+    if (archiveHost) {
+        // The 2024 and 2025 paper archives use different directory layouts.
+        const recent = /^\/bmvc\/(2024)\/papers\/Paper_(\d{1,6})\/paper\.pdf$/.exec(url.pathname) ||
+            /^\/bmvc\/(2025)\/assets\/papers\/Paper_(\d{1,6})\/paper\.pdf$/.exec(url.pathname);
+        if (recent && Number(recent[2]) > 0) return modernPaper(recent[1], recent[2]);
+    }
+    if (archiveHost || ['bmva.org', 'www.bmva.org'].includes(url.hostname)) {
+        // Old bmva.org paper pages now contain a JavaScript redirect to this archive.
+        const old = /^\/bmvc\/(201[5-7])\/papers\/paper(\d{3})\/(?:index\.html|paper(\d{3})\.pdf)$/.exec(url.pathname);
+        if (old && Number(old[2]) > 0 && (!old[3] || old[3] === old[2])) return archivedPaper(old[1], old[2]);
+    }
+    return null;
+}
+
+async function getBibTexBMVC(target) {
+    const page = await fetchOfficialPage(target);
+    const bib = validatePublisherBib(singleBibBlock(parseOfficialHTML(page.text), 'pre.highlight > code, pre.citation'));
+    const archived = /^\/bmvc\/(201[5-7])\/papers\/paper(\d{3})\/index\.html$/.exec(new URL(target.cid).pathname);
+    if (archived) return validatePublisherBib(bib, { doi: `10.5244/C.${Number(archived[1]) - 1986}.${Number(archived[2])}` });
+    if (getBMVCSource(readBibField(bib, 'url'))?.cid !== target.cid) {
+        throw new Error('The official BMVC BibTeX URL does not match this paper.');
+    }
+    return bib;
+}
+
+async function getBibTexECVA(target) {
+    const page = await fetchOfficialPage(target);
+    const doc = parseOfficialHTML(page.text);
+    const links = Array.from(doc.querySelectorAll('a[href]')).map(a => getOfficialSource(new URL(a.getAttribute('href'), page.url).href));
+    const editions = [...new Set(links.filter(link => link?.source === 'Springer').map(link => link.cid))];
+    if (editions.length !== 1) throw new Error('ECVA did not identify a unique Springer chapter for this paper.');
+    return getBibTexSpringer(editions[0]);
+}
+
+async function getBibTexIJCAI(target) {
+    const [, year, number] = /^\/proceedings\/(\d{4})\/(\d+)$/.exec(new URL(target.cid).pathname);
+    const doi = `10.24963/ijcai.${year}/${number}`;
+    const exportURL = `https://www.ijcai.org/proceedings/${year}/bibtex/${number}`;
+    const bib = await requestText(exportURL, {
+        provider: 'IJCAI', verificationUrl: target.cid,
+        validateURL: final => getOfficialSource(final)?.cid === target.cid && new URL(final).pathname.includes('/bibtex/'),
+    });
+    // Invalid paper IDs can return HTTP 200 with an empty, syntactically valid template.
+    return validatePublisherBib(bib, { doi, requireAuthor: true });
+}
+
+async function getBibTexKR(target) {
+    const page = await fetchOfficialPage(target);
+    const doc = parseOfficialHTML(page.text);
+    const link = Array.from(doc.querySelectorAll('a[href]')).find(a => /^bibtex$/i.test(a.textContent.trim()));
+    if (!link) throw new Error('KR did not provide a BibTeX export for this paper.');
+    const exportURL = new URL(link.getAttribute('href'), page.url).href;
+    const isExport = raw => getOfficialSource(raw)?.cid === target.cid && new URL(raw).pathname.includes('/bibtex');
+    if (!isExport(exportURL)) throw new Error('KR linked to an unexpected BibTeX export.');
+    const text = await requestText(exportURL, { provider: 'KR', verificationUrl: target.cid, validateURL: isExport });
+    const bib = /^\s*@/.test(text) ? text : singleBibBlock(parseOfficialHTML(text), 'pre');
+    const [, year, number] = /^\/(\d{4})\/(\d+)\/$/.exec(new URL(target.cid).pathname);
+    return validatePublisherBib(bib, { doi: `10.24963/kr.${year}/${number}` });
+}
+
+async function getBibTexAAAI(initialTarget) {
+    let target = initialTarget;
+    if (new URL(target.cid).hostname !== 'ojs.aaai.org') {
+        // Old OCS IDs changed during migration. Resolve the actual official DOI.
+        const oldPage = await requestText(target.cid, {
+            provider: 'AAAI', verificationUrl: target.cid, withURL: true,
+            validateURL: final => ['aaai.org', 'www.aaai.org', 'ojs.aaai.org'].includes(officialURL(final)?.hostname),
+        });
+        const doc = parseOfficialHTML(oldPage.text);
+        const doi = doc.querySelector('meta[name="citation_doi" i]')?.content ||
+            Array.from(doc.querySelectorAll('a[href]')).map(a => normalizeDOI(a.getAttribute('href'))).find(value => /^10\.1609\//i.test(value)) ||
+            Array.from(doc.querySelectorAll('.paper-section-wrap')).find(section => /^DOI\s*:/i.test(section.querySelector('h4')?.textContent.trim() || ''))?.querySelector('.attribute-output')?.textContent.trim();
+        const resolved = sourceFromDOI(normalizeDOI(doi));
+        if (!resolved || resolved.source !== 'AAAI') throw new Error('The legacy AAAI page did not identify its current official citation.');
+        target = resolved;
+    }
+    const page = await fetchOfficialPage(target);
+    const doc = parseOfficialHTML(page.text);
+    const [, journal, articleID] = /^\/index\.php\/([^/]+)\/article\/view\/(\d+)$/.exec(new URL(target.cid).pathname);
+    const doi = normalizeDOI(doc.querySelector('meta[name="citation_doi" i]')?.content);
+    if (doi && sourceFromDOI(doi)?.cid !== target.cid) throw new Error('AAAI returned a different article DOI.');
+    const link = doc.querySelector('a[href*="/citationstylelanguage/download/bibtex"]');
+    if (!link) throw new Error('AAAI did not provide an original BibTeX export on this paper page.');
+    const exportURL = new URL(link.getAttribute('href'), page.url);
+    const validExport = raw => {
+        const url = officialURL(raw);
+        return url?.hostname === 'ojs.aaai.org' && url.pathname === `/index.php/${journal}/citationstylelanguage/download/bibtex` &&
+            url.searchParams.getAll('submissionId').length === 1 && url.searchParams.get('submissionId') === articleID &&
+            url.searchParams.getAll('publicationId').length <= 1 &&
+            (!url.searchParams.has('publicationId') || /^\d+$/.test(url.searchParams.get('publicationId'))) &&
+            url.searchParams.get('publicationId') === exportURL.searchParams.get('publicationId');
+    };
+    if (!validExport(exportURL.href)) throw new Error('AAAI linked to a different article’s BibTeX.');
+    const bib = validatePublisherBib(await requestText(exportURL.href, {
+        provider: 'AAAI', verificationUrl: target.cid, validateURL: validExport,
+    }), { doi });
+    if (!doi && sourceFromDOI(normalizeDOI(readBibField(bib, 'doi')))?.cid !== target.cid) {
+        throw new Error('The AAAI export could not be matched to this paper.');
+    }
+    return bib;
+}
+
+async function getBibTexIEEE(target) {
+    let cid = target.cid;
+    const expectedDOI = normalizeDOI(cid);
+    if (expectedDOI) {
+        const response = await requestText(cid, {
+            provider: 'IEEE Xplore', verificationUrl: cid, withURL: true,
+            validateURL: final => Boolean(ieeeArticleID(officialURL(final))),
+        });
+        cid = getOfficialSource(response.url).cid;
+    }
+    const articleID = ieeeArticleID(new URL(cid));
+    const exportURL = 'https://ieeexplore.ieee.org/xpl/downloadCitations?legacy=true';
+    // The publisher's download form accepts a single record ID and BibTeX format.
+    const text = await requestText(exportURL, {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        data: new URLSearchParams({ recordIds: articleID, 'citations-format': 'citation-only', 'download-format': 'download-bibtex' }).toString(),
+        provider: 'IEEE Xplore', verificationUrl: cid,
+        validateURL: final => officialURL(final)?.href === exportURL,
+    });
+    const bib = validatePublisherBib(text, { doi: expectedDOI });
+    if (!expectedDOI && parseBibTeXRecords(bib).records[0].key !== articleID) {
+        throw new Error('The IEEE export could not be matched to this paper.');
+    }
+    return bib;
+}
+
+function validateACMBib(text, cid) {
+    const doi = normalizeDOI(new URL(cid).pathname.slice('/doi/'.length));
+    const bib = validatePublisherBib(text);
+    // ACM's 10.5555 records are internal identifiers. The official AAMAS
+    // export omits DOI/URL and uses the identifier suffix as its citation key.
+    if (doi.startsWith('10.5555/') && !readBibField(bib, 'doi').trim()) {
+        const key = parseBibTeXRecords(bib).records[0].key;
+        if (key !== doi && key !== doi.slice('10.5555/'.length)) {
+            throw new Error('The official ACM citation identifier does not match this paper.');
+        }
+        return bib;
+    }
+    return validatePublisherBib(bib, { doi });
+}
+
+function getBibTexACM(cid) {
+    // ACM generates its export in the official citation dialog. Reuse that
+    // renderer in a temporary publisher tab instead of rebuilding CSL fields.
+    return new Promise((resolve, reject) => {
+        const token = crypto.randomUUID().replace(/-/g, '');
+        const requestKey = 'obh-acm-request:' + token;
+        const resultKey = 'obh-acm-result:' + token;
+        let listener;
+        let timer;
+        let tab;
+        let settled = false;
+        const finish = (error, bib) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (error) reject(error);
+            else resolve(bib);
+            // A publisher tab may already be closed. Cleanup must never strand
+            // the citation Promise after its result has been validated.
+            try { if (listener != null) GM_removeValueChangeListener(listener); } catch { /* Already removed. */ }
+            try { GM_deleteValue(requestKey); GM_deleteValue(resultKey); } catch { /* Requests expire independently. */ }
+            if (!error) {
+                try { tab?.close?.(); } catch { /* The citation is still valid. */ }
+            }
+        };
+        try {
+            listener = GM_addValueChangeListener(resultKey, (_name, _old, result) => {
+                if (!result || typeof result !== 'object') return;
+                try {
+                    if (result.cid !== cid) throw new Error('The ACM citation came from a different paper.');
+                    if (result.error) throw new Error(result.error);
+                    finish(null, validateACMBib(result.bib, cid));
+                } catch (error) { finish(error); }
+            });
+            GM_setValue(requestKey, { cid, expiresAt: Date.now() + 90000 });
+            timer = setTimeout(() => {
+                const error = new Error('ACM preview did not finish. Complete any website verification, then retry or use DBLP.');
+                error.verificationUrl = cid;
+                finish(error);
+            }, 90000);
+            tab = GM_openInTab(cid + '#obh-acm=' + token, { active: true, insert: true });
+            if (tab) tab.onclose = () => finish(new Error('The ACM tab was closed. Retry the citation or use DBLP.'));
+        } catch (error) { finish(error); }
+    });
+}
+
+function runACMCitationBridge() {
+    // Inert on ordinary ACM visits. Only a live request from this userscript,
+    // bound to the exact DOI and a random token, may activate the dialog.
+    const token = /^#obh-acm=([a-f\d]{32})$/.exec(location.hash)?.[1];
+    if (!token) return;
+    const requestKey = 'obh-acm-request:' + token;
+    const resultKey = 'obh-acm-result:' + token;
+    const request = GM_getValue(requestKey, null);
+    const target = getOfficialSource(location.href);
+    if (!request || request.cid !== target?.cid || !Number.isFinite(request.expiresAt) ||
+        request.expiresAt <= Date.now() || request.expiresAt > Date.now() + 95000) return;
+    let lastTriggerAt = -Infinity;
+    let formatChanged = false;
+    const respond = result => GM_setValue(resultKey, { cid: request.cid, ...result });
+    const poll = () => {
+        if (!GM_getValue(requestKey, null) || Date.now() >= request.expiresAt) return;
+        try {
+            const dialog = document.querySelector('#exportCitation');
+            // Publisher handlers may attach after the visible button. Retry
+            // opening until the dialog appears, then leave its export alone.
+            if (!isVisible(dialog) && Date.now() - lastTriggerAt >= 1500) {
+                const button = document.querySelector('button[aria-label="Export Citation"], [data-target="#exportCitation"]');
+                if (button && isVisible(button)) { lastTriggerAt = Date.now(); button.click(); }
+            }
+            const format = dialog?.querySelector('#citation-format');
+            if (format && format.value !== 'bibtex' && !formatChanged) {
+                formatChanged = true;
+                format.value = 'bibtex';
+                format.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            const content = dialog?.querySelector('input[name="content"]')?.value;
+            const download = dialog?.querySelector('.download__btn');
+            const ready = dialog && isVisible(dialog) && format?.value === 'bibtex' && content?.trim() &&
+                download && !download.classList.contains('disabled') && !download.disabled;
+            if (ready) {
+                respond({ bib: validateACMBib(content, request.cid) });
+                return;
+            }
+        } catch (error) {
+            respond({ error: error.message || 'The ACM citation dialog could not be read.' });
+            return;
+        }
+        setTimeout(poll, 300);
+    };
+    poll();
+}
+
 async function getBibTexOfficial(source, cid) {
     const target = getOfficialSource(cid);
     if (!target || target.source !== source) throw new Error('Invalid official publication URL.');
     const provider = bibSourceLabel(source);
     const requestOptions = { provider, verificationUrl: target.cid };
+    if (source === 'CVF') {
+        const page = await fetchOfficialPage(target);
+        return validatePublisherBib(singleBibBlock(parseOfficialHTML(page.text), '.bibref'));
+    }
+    if (source === 'ECVA') return getBibTexECVA(target);
+    if (source === 'BMVC') return getBibTexBMVC(target);
+    if (source === 'Springer') return getBibTexSpringer(target.cid);
+    if (source === 'AAAI') return getBibTexAAAI(target);
+    if (source === 'IJCAI') return getBibTexIJCAI(target);
+    if (source === 'KR') return getBibTexKR(target);
+    if (source === 'IEEE') return getBibTexIEEE(target);
+    if (source === 'ACM') return getBibTexACM(target.cid);
     if (source === 'OpenReview') return getBibTexOpenReview(target.cid);
     if (source === 'ACLAnthology') {
         const exportURL = target.cid.replace(/\/$/, '.bib');

@@ -12,7 +12,7 @@
     <img alt="Install from Greasy Fork" src="https://img.shields.io/badge/Install-Greasy_Fork-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/releases">
-    <img alt="Version" src="https://img.shields.io/badge/Version-2.1.0-blue" />
+    <img alt="Version" src="https://img.shields.io/badge/Version-2.2.1-blue" />
   </a>
   <a href="LICENSE">
     <img alt="License" src="https://img.shields.io/badge/License-MIT-blue" />
@@ -54,7 +54,7 @@
 Writing LaTeX documents often requires including numerous academic references. Manually searching for and formatting BibTeX entries can be time-consuming. Overleaf-Bib-Helper streamlines this process by integrating search functionality from DBLP and Google Scholar right into the Overleaf interface, allowing users to quickly find and copy BibTeX entries with minimal effort.
 
 ## Features
-- Original official BibTeX from NeurIPS proceedings, PMLR (including ICML), ACL Anthology, and OpenReview, with visible citation provenance and an explicit DBLP fallback.
+- Original official BibTeX across AI, ML, NLP, and CV: NeurIPS, PMLR, ACL Anthology, OpenReview, CVF, ECVA/Springer, BMVC, AAAI, IJCAI, KR, ACM, and IEEE, with visible citation provenance and an explicit DBLP fallback.
 - Current and legacy Overleaf toolbar support, including recovery after file and layout changes.
 - Open with **Alt+Shift+B** or the Tampermonkey menu; selected text can prefill the search.
 - Editable BibTeX preview, citation-key editing, copy key or `\cite{key}`, and `.bib` download.
@@ -128,6 +128,7 @@ You can install the script in one of two ways:
 3. Add the entry to your project’s `.bib` file before pasting its citation command into LaTeX. The helper does not automatically modify project files.
 4. Copy and download validate the edited BibTeX; network errors and verification pages leave the clipboard unchanged.
 5. Each result and preview identifies the BibTeX source. Official exports retain their original keys and fields. A failed official request offers **Use DBLP BibTeX**, which switches the preference and searches again; it does not silently replace or copy the citation.
+6. **Open ACM preview / Open ACM & copy** opens the publisher's citation dialog in a separate tab. The helper returns the official dialog's BibTeX to Overleaf. Allow that tab to finish loading, and complete any site verification if prompted. Closing it cancels the request so you can retry.
 
 <div align="center">
 <img src="figure/ui-v2.png" width="600" alt="Bib Helper search and editable BibTeX preview" />
@@ -145,16 +146,28 @@ For DBLP results, the default BibTeX preference reads these official exports:
 | Official source | Examples | Export |
 | --- | --- | --- |
 | [NeurIPS proceedings](https://proceedings.neurips.cc/) | NeurIPS / NIPS | The paper page's Bibtex link, including older proceedings and newer tracks |
-| [PMLR](https://proceedings.mlr.press/) | ICML, AISTATS, and other PMLR volumes | Original BibTeX embedded in the paper page |
-| [ACL Anthology](https://aclanthology.org/info/ids/) | ACL, EMNLP, NAACL, Findings | Official `.bib` export, including legacy IDs |
-| [OpenReview](https://github.com/openreview/openreview-web/blob/master/components/forum/ForumNote.js) | ICLR and other indexed conference papers | The provided `_bibtex` field from the official API; no generated substitute |
+| [PMLR](https://proceedings.mlr.press/) | ICML, AISTATS, COLT, UAI, CoRL | Original BibTeX embedded in the paper page |
+| [ACL Anthology](https://aclanthology.org/info/ids/) | ACL, EMNLP, NAACL, EACL, COLING, IJCNLP, LREC, Findings | Official `.bib` export, including legacy IDs |
+| [OpenReview](https://github.com/openreview/openreview-web/blob/master/components/forum/ForumNote.js) | ICLR, COLM, and other indexed proceedings | The official API's `_bibtex`; publication status is checked |
+| [CVF Open Access](https://openaccess.thecvf.com/) | CVPR, ICCV, WACV, ACCV, their workshops, ECCV 2018 | Original BibTeX block; modern and historical paper/PDF links |
+| [ECVA](https://www.ecva.net/papers.php) / [Springer](https://link.springer.com/) | ECCV, ACCV, MICCAI, ECML PKDD and other Springer proceedings | Publisher BibTeX export; ECVA resolves the paper's actual Springer link |
+| [BMVA / BMVC](https://www.bmva.org/bmvc) | BMVC 2023–2025 and archived 2015–2017 proceedings | Original citation block on verified paper pages |
+| [AAAI OJS](https://ojs.aaai.org/) | AAAI, ICAPS, ICWSM, AIIDE, AIES, HCOMP, SoCS, AAAI-SS | The paper's actual BibTeX download link; migrated legacy pages resolve through their official DOI |
+| [IJCAI](https://www.ijcai.org/proceedings/) | IJCAI proceedings from 2017 | Original per-paper BibTeX export |
+| [KR](https://proceedings.kr.org/) | KR proceedings | The official paper's BibTeX link |
+| [ACM Digital Library](https://dl.acm.org/) | KDD, WWW, SIGIR, CIKM, WSDM, ACM MM, AAMAS papers with ACM links | Reads the official citation dialog in a temporary publisher tab |
+| [IEEE Xplore](https://ieeexplore.ieee.org/) | ICDM, ICASSP, ICIP, IJCNN, ICDE and other IEEE proceedings | Original BibTeX download; subject to publisher verification/access |
 
-Unsupported publication links and preprints continue to use DBLP and are labeled accordingly. OpenReview may require browser verification, and some notes have no official export. Submitted, rejected, and withdrawn citations are not accepted as published OpenReview conference versions. NeurIPS, PMLR, and ACL exports have been checked against live official responses; OpenReview's successful response formats are covered by schema-based regression tests because live API requests required verification during validation.
+Coverage follows the publication link and available official export, not just a venue name: it does not guarantee every year, track, or paper. DOI links are recognized for supported publishers. CVF is preferred over IEEE when both identify the same result. Unsupported links, PDF-only historical proceedings, and preprints use DBLP and are labeled accordingly. BMVC years outside the verified list and pre-2017 IJCAI currently use DBLP unless another supported publisher link is available.
+
+The helper preserves the publisher's keys, fields, and publication year, including cases where the proceedings year differs from the conference year. OpenReview notes without an official export, or marked submitted/rejected/withdrawn, are not accepted as published conference citations. Some publishers require browser verification; the error provides an official-page action and an explicit DBLP choice. IEEE's successful export format is regression-tested against its published download contract; live requests were restricted during validation, so availability cannot be guaranteed.
+
+For ACM, the script also runs on `dl.acm.org/doi/*` solely to answer a short-lived request started from Overleaf. Normal ACM visits remain unchanged. Bibliographic fields are not reconstructed from CSL or Crossref, and no publisher renderer is bundled.
 
 ## Troubleshooting
 - **Script Not Working?**
   - Allow Tampermonkey to run userscripts using **Allow User Scripts** or extension **Developer Mode**.
-  - If the Bib button is missing, try **Alt+Shift+B** or the Tampermonkey menu and verify that you have v2.1.0 installed.
+  - If the Bib button is missing, try **Alt+Shift+B** or the Tampermonkey menu and verify that you have v2.2.1 installed.
   - Ensure Tampermonkey is enabled and the script is active.
   - Verify you’re on an Overleaf project page.
   - Reload or reinstall from Greasy Fork.
@@ -171,6 +184,7 @@ Unsupported publication links and preprints continue to use DBLP and are labeled
 While Overleaf-Bib-Helper aims to provide a seamless experience, please note that it relies on external services (DBLP and Google Scholar) which may change their APIs or require user verification (e.g., CAPTCHA). Use this tool at your own discretion and always verify retrieved BibTeX entries before including them in your documents.
 
 ## Changelog
+- **2026-09-07 (v2.2.1)**: Expanded original official BibTeX to CVF, ECVA/Springer, verified BMVC proceedings, AAAI-family venues, IJCAI, KR, ACM, and IEEE. Added DOI routing, publisher identity validation, legacy AAAI migration, and a cancellable ACM citation-dialog bridge. Added provider, historical-format, and cross-tab lifecycle regression tests. v2.2.0 builds were used only for local verification.
 - **2026-09-07 (v2.1.0)**: Added original official BibTeX retrieval from NeurIPS, PMLR, ACL Anthology, and OpenReview; separate search and citation-source preferences; citation provenance; explicit DBLP fallback; original-field preservation and publication/URL validation. Added official-provider and request-race regression coverage.
 - **2026-09-07 (v2.0.2)**: Simplified the toolbar launcher to borderless **Bib** text, preserving keyboard focus visibility.
 - **2026-09-07 (v2.0.1)**: Current toolbar compatibility and layout recovery; dependency-free startup; shortcut/menu/selection search; recent queries; BibTeX preview/edit/key/citation/download; request timeouts, HTTP/BibTeX validation, stale-search protection, pinned Scholar origins and explicit verification actions; Unicode grouping and strict Hide preprints. Added Playwright regression coverage and GitHub Actions.

@@ -8,7 +8,7 @@
     <img alt="从Greasy Fork安装" src="https://img.shields.io/badge/Install-Greasy_Fork-blue" />
   </a>
   <a href="https://github.com/MLNLP-World/Overleaf-Bib-Helper/releases">
-    <img alt="版本" src="https://img.shields.io/badge/Version-2.1.0-blue" />
+    <img alt="版本" src="https://img.shields.io/badge/Version-2.2.1-blue" />
   </a>
   <a href="LICENSE">
     <img alt="许可证" src="https://img.shields.io/badge/License-MIT-blue" />
@@ -49,7 +49,7 @@
 编写LaTeX文档通常需要包含大量的学术参考文献。手动搜索和格式化BibTeX条目可能非常耗时。Overleaf-Bib-Helper通过将DBLP和Google Scholar的搜索功能集成到Overleaf界面中，简化了这一过程，使用户能够快速找到并复制BibTeX条目，省时省力。
 
 ## 功能
-- 从 NeurIPS proceedings、PMLR（含 ICML）、ACL Anthology 和 OpenReview 读取官网原始 BibTeX，显示引用出处，并提供显式 DBLP fallback。
+- 跨 AI、ML、NLP、CV 获取官网原始 BibTeX：支持 NeurIPS、PMLR、ACL Anthology、OpenReview、CVF、ECVA/Springer、BMVC、AAAI、IJCAI、KR、ACM 和 IEEE，显示引用出处，并提供显式 DBLP fallback。
 - 适配新版和旧版 Overleaf toolbar；切换文件或布局后自动恢复 `Bib` 按钮。
 - `Alt+Shift+B` 或 Tampermonkey menu 随时打开，可将选中的论文标题带入搜索框。
 - BibTeX 预览与编辑、citation key 修改、一键复制 key 或 `\cite{key}`、下载 `.bib` 文件。
@@ -140,16 +140,28 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 | 官网来源 | 覆盖示例 | 获取方式 |
 | --- | --- | --- |
 | [NeurIPS proceedings](https://proceedings.neurips.cc/) | NeurIPS / NIPS | 读取论文页实际提供的 Bibtex 链接，兼容旧年份与新版 tracks |
-| [PMLR](https://proceedings.mlr.press/) | ICML、AISTATS 及其他 PMLR volumes | 读取论文页内的原始 BibTeX |
-| [ACL Anthology](https://aclanthology.org/info/ids/) | ACL、EMNLP、NAACL、Findings | 官方 `.bib` 文件，兼容旧版 ID |
-| [OpenReview](https://github.com/openreview/openreview-web/blob/master/components/forum/ForumNote.js) | ICLR 等已收录的会议论文 | 读取官方 API 提供的 `_bibtex`，不自行生成替代引用 |
+| [PMLR](https://proceedings.mlr.press/) | ICML、AISTATS、COLT、UAI、CoRL | 读取论文页内的原始 BibTeX |
+| [ACL Anthology](https://aclanthology.org/info/ids/) | ACL、EMNLP、NAACL、EACL、COLING、IJCNLP、LREC、Findings | 官方 `.bib` 文件，兼容旧版 ID |
+| [OpenReview](https://github.com/openreview/openreview-web/blob/master/components/forum/ForumNote.js) | ICLR、COLM 等已收录 proceedings | 读取官方 API 的 `_bibtex`，并核对发表状态 |
+| [CVF Open Access](https://openaccess.thecvf.com/) | CVPR、ICCV、WACV、ACCV、相关 workshops、ECCV 2018 | 读取原始 BibTeX block，识别新版和历史论文/PDF 链接 |
+| [ECVA](https://www.ecva.net/papers.php) / [Springer](https://link.springer.com/) | ECCV、ACCV、MICCAI、ECML PKDD 等 Springer proceedings | 读取出版社 BibTeX；ECVA 使用论文页实际提供的 Springer 链接 |
+| [BMVA / BMVC](https://www.bmva.org/bmvc) | BMVC 2023–2025、归档的 2015–2017 | 读取已核实论文页面的原始 citation block |
+| [AAAI OJS](https://ojs.aaai.org/) | AAAI、ICAPS、ICWSM、AIIDE、AIES、HCOMP、SoCS、AAAI-SS | 使用论文实际的 BibTeX 下载链接；旧版页面通过官方 DOI 解析迁移后的记录 |
+| [IJCAI](https://www.ijcai.org/proceedings/) | 2017 年起的 IJCAI proceedings | 官网单篇 BibTeX export |
+| [KR](https://proceedings.kr.org/) | KR proceedings | 读取官方论文页提供的 BibTeX 链接 |
+| [ACM Digital Library](https://dl.acm.org/) | KDD、WWW、SIGIR、CIKM、WSDM、ACM MM，以及有 ACM 链接的 AAMAS 论文 | 打开临时出版社标签，读取官网引用窗口实际生成的 BibTeX |
+| [IEEE Xplore](https://ieeexplore.ieee.org/) | ICDM、ICASSP、ICIP、IJCNN、ICDE 等 IEEE proceedings | 官网原始 BibTeX 下载，受出版社验证与访问限制影响 |
 
-不支持的出版链接和 preprint 继续使用 DBLP，并明确标注。OpenReview 可能要求浏览器验证，部分 note 也没有官方导出；submitted、rejected、withdrawn 引用不会被当成正式会议版本。NeurIPS、PMLR 和 ACL 已核对官网实际响应；OpenReview 的成功响应格式通过 schema regression tests 验证，当前 live API 请求受到验证限制。
+支持范围取决于论文的出版链接和官网是否提供 export，不能仅凭会议名称保证每个年份、track 和论文都可用。支持已接入出版社的 DOI 链接；同一结果同时提供 CVF 与 IEEE 时优先 CVF。不支持的链接、只有 PDF 的历史 proceedings 和 preprint 使用 DBLP，并明确标注。已列范围外的 BMVC 年份、2017 年前的 IJCAI 暂用 DBLP，除非存在其他已支持的出版社链接。
+
+脚本保留出版社原有的 key、字段与出版年份，包括出版年份与会议年份不同的情况。OpenReview 缺少官方 export，或标记为 submitted/rejected/withdrawn 的引用不会被当成正式会议版本。部分出版社可能要求浏览器验证；出错时可打开官方页面或显式切回 DBLP。IEEE 的成功导出格式已根据官网公开下载接口做 regression tests，但 live 请求在验证时受到限制，不能保证始终可访问。
+
+对于 ACM，点击 **Open ACM preview / Open ACM & copy** 后，等待新标签中的官方引用窗口完成加载；若官网要求验证，完成后继续。关闭标签会取消请求，可立即重试。脚本新增的 `dl.acm.org/doi/*` 范围仅用于响应从 Overleaf 发起的短时请求，普通 ACM 访问不会触发动作；不从 CSL 或 Crossref 重组引用，也不打包出版社 renderer。
 
 ## 故障排除
 - **脚本不起作用？**
   - 确保 Tampermonkey 已获允许运行 userscripts；Chrome 可开启 **Allow User Scripts** 或 **开发者模式**。
-  - 若 Bib 按钮没有显示，尝试 **Alt+Shift+B** 或 Tampermonkey menu，并确认已更新到 v2.1.0。
+  - 若 Bib 按钮没有显示，尝试 **Alt+Shift+B** 或 Tampermonkey menu，并确认已更新到 v2.2.1。
   - 确保Tampermonkey已启用且脚本处于活动状态。
   - 确认您在Overleaf项目页面上。
   - 重新加载或从Greasy Fork重新安装。
@@ -166,6 +178,7 @@ Tampermonkey是一个运行Overleaf-Bib-Helper等用户脚本所需的浏览器�
 虽然Overleaf-Bib-Helper旨在提供无缝体验，但请注意，它依赖于外部服务（DBLP和Google Scholar），这些服务的API可能会更改或需要用户验证（例如验证码）。请自行决定使用此工具，并始终在将检索到的BibTeX条目纳入文档前进行验证。
 
 ## 更新日志
+- **2026-09-07 (v2.2.1)**：扩展 CVF、ECVA/Springer、已核实的 BMVC proceedings、AAAI 系列会议、IJCAI、KR、ACM、IEEE 官网原始 BibTeX。新增 DOI 路由、出版社记录匹配、旧 AAAI 页面迁移和可取消的 ACM 引用窗口 bridge；增加官网格式、历史页面与跨标签生命周期 regression tests。v2.2.0 系列仅用于本地验证。
 - **2026-09-07 (v2.1.0)**：新增 NeurIPS、PMLR、ACL Anthology、OpenReview 官网原始 BibTeX；分离检索与引用来源偏好，显示引用出处，支持显式切回 DBLP；保留官网字段并验证 URL 与发表状态。新增官方来源及请求过期 regression tests。
 - **2026-09-07 (v2.0.2)**：toolbar 入口改为无边框的 **Bib** 纯文字按钮，保留键盘操作时的焦点提示。
 - **2026-09-07 (v2.0.1)**：适配新版 toolbar，支持布局切换后恢复入口；移除外部运行依赖；新增快捷键、menu、选中文字搜索、最近查询、BibTeX preview/edit/key/citation/download；增加 timeout、HTTP 与 BibTeX 验证、过期搜索保护、Scholar origin 固定和显式验证入口；修复多语言分组与 Hide preprints 筛选。新增 Playwright regression tests 和 GitHub Actions。

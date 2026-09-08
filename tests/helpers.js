@@ -8,7 +8,7 @@ const GLOBAL_TOOLBAR = '<div class="ide-redesign-toolbar-actions" id="global-too
 const VALID_BIB = '@article{attention2026,\n  title = {Attention with {Nested} Braces},\n  author = {Yin, Xunjian},\n  year = {2026}\n}';
 
 /** Each test runs an inert Overleaf fixture in a fresh browser context. */
-async function boot(page, { toolbar = MODERN_TOOLBAR, storage = {} } = {}) {
+async function boot(page, { toolbar = MODERN_TOOLBAR, storage = {}, url = 'https://www.overleaf.com/project/regression-fixture' } = {}) {
   await page.route('**/*', async (route) => {
     if (route.request().isNavigationRequest()) {
       return route.fulfill({
@@ -24,7 +24,7 @@ async function boot(page, { toolbar = MODERN_TOOLBAR, storage = {} } = {}) {
     }
     return route.abort();
   });
-  await page.goto('https://www.overleaf.com/project/regression-fixture');
+  await page.goto(url);
   await page.evaluate((initialStorage) => {
     const state = window.__obhTest = {
       storage: { ...initialStorage },
@@ -33,9 +33,25 @@ async function boot(page, { toolbar = MODERN_TOOLBAR, storage = {} } = {}) {
       requests: [],
       menus: [],
       openedTabs: [],
+      closedTabs: [],
+      valueListeners: new Map(),
+      nextListener: 0,
     };
     window.GM_getValue = (key, fallback) => Object.hasOwn(state.storage, key) ? state.storage[key] : fallback;
-    window.GM_setValue = (key, value) => { state.storage[key] = value; };
+    window.GM_setValue = (key, value) => {
+      const old = state.storage[key];
+      state.storage[key] = value;
+      for (const listener of state.valueListeners.values()) {
+        if (listener.key === key) listener.callback(key, old, value, true);
+      }
+    };
+    window.GM_addValueChangeListener = (key, callback) => {
+      const id = ++state.nextListener;
+      state.valueListeners.set(id, { key, callback });
+      return id;
+    };
+    window.GM_removeValueChangeListener = id => state.valueListeners.delete(id);
+    window.GM_deleteValue = key => { delete state.storage[key]; };
     window.GM_addStyle = (css) => {
       const style = document.createElement('style');
       style.textContent = css;
@@ -51,7 +67,10 @@ async function boot(page, { toolbar = MODERN_TOOLBAR, storage = {} } = {}) {
       state.menus.push({ label, callback });
       return state.menus.length;
     };
-    window.GM_openInTab = (url) => { state.openedTabs.push(url); };
+    window.GM_openInTab = (url) => {
+      state.openedTabs.push(url);
+      return { close() { state.closedTabs.push(url); } };
+    };
     window.GM_xmlhttpRequest = (options) => {
       const request = { options, aborted: false };
       state.requests.push(request);
